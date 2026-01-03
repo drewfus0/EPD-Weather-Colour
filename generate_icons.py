@@ -1,5 +1,6 @@
 from PIL import Image, ImageDraw
 import os
+import math
 
 # Configuration
 ICON_SIZE = (96, 96)
@@ -68,10 +69,28 @@ def draw_lightning(draw, x, y):
     draw.line(points, fill=YELLOW, width=2)
 
 def draw_fog(draw, x, y):
-    # Horizontal gray (black dithered?) lines
+    # Wavy lines
     for i in range(3):
-        dy = y + i * 10
-        draw.line([x, dy, x+50, dy], fill=BLACK, width=2)
+        base_y = y + i * 12
+        points = []
+        for px in range(0, 55, 2):
+            # Sine wave approximation
+            py = base_y + 4 * math.sin(px * 0.2)
+            points.append((x + px, py))
+        draw.line(points, fill=BLACK, width=2)
+
+def draw_wind(draw, x, y):
+    # Curling lines
+    # Top line
+    draw.line([(x, y), (x+35, y)], fill=BLUE, width=3)
+    # Curl back
+    draw.arc([x+25, y-10, x+45, y+10], start=270, end=100, fill=BLUE, width=3)
+    
+    # Bottom line offset
+    y2 = y + 20
+    x2 = x + 15
+    draw.line([(x2, y2), (x2+35, y2)], fill=BLUE, width=3)
+    draw.arc([x2+25, y2-10, x2+45, y2+10], start=270, end=100, fill=BLUE, width=3)
 
 # --- Icon Generators ---
 
@@ -85,48 +104,46 @@ def gen_partly_cloudy():
     img = create_base_image()
     draw = ImageDraw.Draw(img)
     draw_sun(draw, 65, 30, 20)
-    draw_cloud(draw, 20, 55) # Moved down from 50
+    draw_cloud(draw, 20, 55)
     return img
 
 def gen_cloudy():
     img = create_base_image()
     draw = ImageDraw.Draw(img)
-    draw_cloud(draw, 25, 45, 1.2) # Moved down from 40
+    draw_cloud(draw, 25, 45, 1.2)
     return img
 
 def gen_rain():
     img = create_base_image()
     draw = ImageDraw.Draw(img)
-    draw_cloud(draw, 25, 35, 1.1) # Moved down from 30
-    draw_rain(draw, 35, 70) # Moved down from 65
+    draw_cloud(draw, 25, 45, 1.1) # Moved down
+    draw_rain(draw, 35, 75) # Moved down
     return img
 
 def gen_snow():
     img = create_base_image()
     draw = ImageDraw.Draw(img)
-    draw_cloud(draw, 25, 35, 1.1) # Moved down from 30
-    draw_snow(draw, 35, 70) # Moved down from 65
+    draw_cloud(draw, 25, 45, 1.1) # Moved down
+    draw_snow(draw, 35, 75) # Moved down
     return img
 
 def gen_storm():
     img = create_base_image()
     draw = ImageDraw.Draw(img)
-    draw_cloud(draw, 25, 35, 1.1) # Moved down from 30
-    draw_lightning(draw, 48, 65) # Moved down from 60
+    draw_cloud(draw, 25, 45, 1.1) # Moved down
+    draw_lightning(draw, 48, 75) # Moved down
     return img
 
 def gen_fog():
     img = create_base_image()
     draw = ImageDraw.Draw(img)
-    draw_fog(draw, 23, 35)
+    draw_fog(draw, 20, 35)
     return img
 
 def gen_wind():
     img = create_base_image()
     draw = ImageDraw.Draw(img)
-    # Draw some curved lines (approximated)
-    draw.arc([20, 30, 60, 50], start=180, end=0, fill=BLUE, width=3)
-    draw.arc([40, 50, 80, 70], start=0, end=180, fill=BLUE, width=3)
+    draw_wind(draw, 20, 40)
     return img
 
 # Mapping Google API names to generators
