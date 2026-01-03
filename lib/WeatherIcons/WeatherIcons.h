@@ -16,18 +16,18 @@
 class WeatherIcons {
 public:
     WeatherIcons(Adafruit_GFX& display);
-    void drawWeatherIcon(String iconName, int x, int y);
+    void drawWeatherIcon(String iconName, int x, int y, int iconSize = 94);
 
 private:
     Adafruit_GFX& _display;
     
-    void drawSun(int x, int y, int radius);
+    void drawSun(int x, int y, int radius, float scale);
     void drawCloud(int x, int y, float scale);
-    void drawRain(int x, int y);
-    void drawSnow(int x, int y);
-    void drawLightning(int x, int y);
-    void drawFog(int x, int y);
-    void drawWind(int x, int y);
+    void drawRain(int x, int y, float scale);
+    void drawSnow(int x, int y, float scale);
+    void drawLightning(int x, int y, float scale);
+    void drawFog(int x, int y, float scale);
+    void drawWind(int x, int y, float scale);
     
     // Helpers
     void drawThickLine(int x1, int y1, int x2, int y2, int width, uint16_t color);

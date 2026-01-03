@@ -4,65 +4,34 @@
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include "secrets.h"
-#include <epd7c/GxEPD2_730c_GDEP073E01.h>
-#include "WeatherIcons.h"
+#include "Display.h"
 
 // Forward declaration
 void ListWifiAPs();
 
-struct WeatherData {
-  String conditionText;
-  String iconName;
-  float temp;
-  float feelsLike;
-  float windSpeed;
-  float windGust;
-  int windDirection;
-  int humidity;
-  int precipitationProbability;
-  int uvIndex;
-  int pressure;
-  bool valid = false;
-};
-
 WeatherData currentWeather;
+DailyForecast dailyForecasts[3];
+HourlyData hourlyData[24];
 
-#include <GxEPD2_7C.h>
-#include <Adafruit_GFX.h>
-#include <Fonts/FreeMonoBold9pt7b.h>
-#include <Fonts/FreeMonoBold12pt7b.h>
-#include <Fonts/FreeMonoBold18pt7b.h>
-#include <Fonts/FreeMonoBold24pt7b.h>
+Display displayHandler;
 
-#include <Fonts/FreeSans9pt7b.h>
-#include <Fonts/FreeSans12pt7b.h>
-#include <Fonts/FreeSans18pt7b.h>
-#include <Fonts/FreeSans24pt7b.h>
+void initMockForecastData() {
+  // Mock 3-day forecast
+  dailyForecasts[0] = {"Tomorrow", "partly_cloudy", "Partly Cloudy", 22.5, 14.0};
+  dailyForecasts[1] = {"Wednesday", "rain", "Rain", 18.0, 12.5};
+  dailyForecasts[2] = {"Thursday", "sunny", "Sunny", 25.0, 15.0};
 
-#include <Fonts/FreeMono9pt7b.h>
-#include <Fonts/FreeMono12pt7b.h>
-#include <Fonts/FreeMono18pt7b.h>
-#include <Fonts/FreeMono24pt7b.h>
-
-#include <Fonts/FreeSansBold9pt7b.h>
-#include <Fonts/FreeSansBold12pt7b.h>
-#include <Fonts/FreeSansBold18pt7b.h>
-#include <Fonts/FreeSansBold24pt7b.h>
-
-// Pin definitions based on your wiring
-#define EPD_BUSY 25
-#define EPD_RST  26
-#define EPD_DC   2
-#define EPD_CS   14
-#define EPD_SCK  18
-#define EPD_MOSI 23
-
-// Select the display class. 
-// Waveshare 7.3inch e-Paper HAT (E) uses the GDEP073E01 (Spectra 6) panel.
-// We should use a smaller page height (HEIGHT / 4) to avoid RAM overflow on ESP32.
-// Reducing page height further to save RAM for other tasks
-GxEPD2_7C<GxEPD2_730c_GDEP073E01, GxEPD2_730c_GDEP073E01::HEIGHT / 8> display(GxEPD2_730c_GDEP073E01(EPD_CS, EPD_DC, EPD_RST, EPD_BUSY));
-WeatherIcons weatherIcons(display);
+  // Mock 24-hour data
+  for (int i = 0; i < 24; i++) {
+    hourlyData[i].hour = i;
+    hourlyData[i].temp = 15.0 + 5.0 * sin((i - 6) * PI / 12.0); // Low at 6am, High at 6pm
+    if (i > 10 && i < 18) {
+        hourlyData[i].rainProb = 0;
+    } else {
+        hourlyData[i].rainProb = random(0, 60);
+    }
+  }
+}
 
 // e.g. "https://maps.gstatic.com/weather/v1/partly_clear.png" -> "partly_clear"
 String getIconNameFromUri(String uri) {
@@ -206,61 +175,61 @@ void getWeatherForcastData(int hours = 24) {
   }
 }
 
-// void getWeatherCurrentData_ForOnline(){
-//     if (WiFi.status() == WL_CONNECTED) {
-//     String url = "https://weather.googleapis.com/v1/currentConditions:lookup?key=" + String(GOOGLE_API_KEY) 
-//       + "&location.latitude=" + String(LATITUDE) 
-//       + "&location.longitude=" + String(LONGITUDE)
-//       + "&unitsSystem=METRIC";
+void getWeatherCurrentData(){
+    if (WiFi.status() == WL_CONNECTED) {
+    String url = "https://weather.googleapis.com/v1/currentConditions:lookup?key=" + String(GOOGLE_API_KEY) 
+      + "&location.latitude=" + String(LATITUDE) 
+      + "&location.longitude=" + String(LONGITUDE)
+      + "&unitsSystem=METRIC";
     
-//     Serial.println("Requesting URL: " + url);
+    Serial.println("Requesting URL: " + url);
 
-//     WiFiClientSecure client;
-//     client.setInsecure();
-//     HTTPClient http;
-//     http.begin(client, url);
-//     int httpResponseCode = http.GET();
+    WiFiClientSecure client;
+    client.setInsecure();
+    HTTPClient http;
+    http.begin(client, url);
+    int httpResponseCode = http.GET();
     
-//     if (httpResponseCode > 0) {
-//       String payload = http.getString();
-//       Serial.println("HTTP Response code: " + String(httpResponseCode));
-//       Serial.println("Payload: " + payload);
+    if (httpResponseCode > 0) {
+      String payload = http.getString();
+      Serial.println("HTTP Response code: " + String(httpResponseCode));
+      Serial.println("Payload: " + payload);
 
-//       JsonDocument filter;
-//       filter["weatherCondition"]["description"]["text"] = true;
-//       filter["weatherCondition"]["iconBaseUri"] = true;
-//       filter["temperature"]["degrees"] = true;
-//       filter["feelsLikeTemperature"]["degrees"] = true;
-//       filter["wind"]["speed"]["value"] = true;
-//       filter["wind"]["gust"]["value"] = true;
-//       filter["wind"]["direction"]["degrees"] = true;
-//       filter["relativeHumidity"] = true;
-//       filter["precipitation"]["probability"]["percent"] = true;
-//       filter["uvIndex"] = true;
-//       filter["airPressure"]["meanSeaLevelMillibars"] = true;
+      JsonDocument filter;
+      filter["weatherCondition"]["description"]["text"] = true;
+      filter["weatherCondition"]["iconBaseUri"] = true;
+      filter["temperature"]["degrees"] = true;
+      filter["feelsLikeTemperature"]["degrees"] = true;
+      filter["wind"]["speed"]["value"] = true;
+      filter["wind"]["gust"]["value"] = true;
+      filter["wind"]["direction"]["degrees"] = true;
+      filter["relativeHumidity"] = true;
+      filter["precipitation"]["probability"]["percent"] = true;
+      filter["uvIndex"] = true;
+      filter["airPressure"]["meanSeaLevelMillibars"] = true;
 
-//       JsonDocument doc;
-//       DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
+      JsonDocument doc;
+      DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
 
-//       if (error) {
-//         Serial.print("deserializeJson() failed: ");
-//         Serial.println(error.c_str());
-//       } else {
-//         JsonObject newWeather = doc.as<JsonObject>();
-//         updateCurrentWeather(newWeather);
-//       }
-//     } else {
-//       Serial.print("Error code: ");
-//       Serial.println(httpResponseCode);
-//     }
-//     http.end();
-//   } else {
-//     Serial.println("WiFi Disconnected");
-//   }
-// }
+      if (error) {
+        Serial.print("deserializeJson() failed: ");
+        Serial.println(error.c_str());
+      } else {
+        JsonObject newWeather = doc.as<JsonObject>();
+        updateCurrentWeather(newWeather);
+      }
+    } else {
+      Serial.print("Error code: ");
+      Serial.println(httpResponseCode);
+    }
+    http.end();
+  } else {
+    Serial.println("WiFi Disconnected");
+  }
+}
 
 
-void getWeatherCurrentData() {
+void getMOCKWeatherCurrentData() {
   // Mock data for testing to save API calls
   Serial.println("Using Mock Data for Current Weather");
   String payload = R"({
@@ -385,198 +354,23 @@ void getWeatherCurrentData() {
   }
 }
 
-void RenderText(int16_t x, int16_t y, const GFXfont *font, uint16_t color, String text, int maxCharsPerLine = 12) {
-  display.setFont(font);
-  display.setTextColor(color);
-  display.setCursor(x, y);
-
-  int currentLineLen = 0;
-  int start = 0;
-  int end = text.indexOf(' ');
-
-  while (end != -1) {
-    String word = text.substring(start, end);
-    
-    // Check if adding this word exceeds the line limit
-    // We only wrap if it's not the first word on the line
-    if (currentLineLen + word.length() > maxCharsPerLine && currentLineLen > 0) {
-      display.println();
-      currentLineLen = 0;
-    }
-    
-    // Add space before word if it's not the start of a line
-    if (currentLineLen > 0) {
-      display.print(" ");
-      currentLineLen++;
-    }
-    
-    display.print(word);
-    currentLineLen += word.length();
-    
-    start = end + 1;
-    end = text.indexOf(' ', start);
-  }
-  
-  // Process the remaining part of the string (last word)
-  String lastWord = text.substring(start);
-  if (lastWord.length() > 0) {
-    if (currentLineLen + lastWord.length() > maxCharsPerLine && currentLineLen > 0) {
-      display.println();
-    } else if (currentLineLen > 0) {
-      display.print(" ");
-    }
-    display.print(lastWord);
-  }
-}
-
-void RenderTitleText(int16_t x, int16_t y, String text) {
-  RenderText(x, y, &FreeMono9pt7b, GxEPD_BLACK, text, 15); // Assume title max 20 chars per line
-}
-
-void RenderPrimaryValue(int16_t x, int16_t y, String text) {
-  RenderText(x, y, &FreeSansBold18pt7b, GxEPD_BLUE, text, 15); // Assume subtitle max 30 chars per line
-}
-
-void RenderSecondaryValue(int16_t x, int16_t y, String text) {
-  RenderText(x, y, &FreeSansBold12pt7b, GxEPD_BLACK, text, 20); // Assume subtitle max 30 chars per line
-}
-
-void drawWindDirection(int colW, int yCenter)
-{
-  int cx = colW * 2 + 70;
-  int cy = yCenter + 80;
-  int r = 30;
-  display.drawCircle(cx, cy, r, GxEPD_BLACK);
-
-  float angle = (currentWeather.windDirection - 90) * PI / 180.0;
-
-  // Calculate triangle vertices
-  // Tip
-  int x1 = cx + (r - 6) * cos(angle);
-  int y1 = cy + (r - 6) * sin(angle);
-
-  // Back Left (offset by ~150 degrees)
-  int x2 = cx + (r - 6) * cos(angle + 2.6);
-  int y2 = cy + (r - 6) * sin(angle + 2.6);
-
-  // Back Right (offset by ~-150 degrees)
-  int x3 = cx + (r - 6) * cos(angle - 2.6);
-  int y3 = cy + (r - 6) * sin(angle - 2.6);
-
-  display.fillTriangle(x1, y1, x2, y2, x3, y3, GxEPD_RED);
-}
-
 void setup() {
   Serial.begin(115200);
   delay(10000);
+
   Serial.println();
-  
   Serial.println("--- Test Start: Paged Rendering with Fonts ---");
   
   // Connect to WiFi and get weather data
   connectToWiFi();
 
   //getWeatherForcastData();
-  getWeatherCurrentData();
+  getMOCKWeatherCurrentData();
+  initMockForecastData();
 
-  // Initialize display
-  Serial.println("Initializing display...");
-  display.init(115200, true, 2, false);
-  display.setRotation(0);
-  display.setFullWindow();
-  
-  // Use paged drawing mode (like your weather display)
-  Serial.println("Starting paged rendering...");
-  display.firstPage();
-  int page = 0;
-  do
-  {
-    Serial.print("Rendering Page: "); Serial.println(page++);
-    
-    // Fill with white
-    display.fillScreen(GxEPD_WHITE);
-    
-    if (currentWeather.valid) {
-      int topH = 160;
-      int w = 800;
-      int colW = w / 5;
-      int yCenter = topH / 2;
-
-      // Draw separator line
-      display.drawLine(0, topH, w, topH, GxEPD_BLACK);
-
-      // Col 1: Condition (Icon + Text)
-      // Icon
-      int iconX = colW * 0 + 20;
-      int iconY = 20;
-      weatherIcons.drawWeatherIcon(currentWeather.iconName, iconX, iconY);
-      
-      // Text
-      display.setCursor(colW * 0 + 10, 130);
-      // Wrap text if too long? For now just print
-      String cond = currentWeather.conditionText;
-      if (cond.length() > 15) cond = cond.substring(0, 15);
-      display.print(cond);
-
-      // Col 2: Temp
-      RenderTitleText(colW * 1 + 10, yCenter - 60, "Temperature");
-      RenderPrimaryValue(colW * 1 + 10, yCenter - 20, String(currentWeather.temp) + " c");
-      RenderTitleText(colW * 1 + 10, yCenter + 20, "Feels Like:");
-      RenderSecondaryValue(colW * 1 + 10, yCenter + 50, String(currentWeather.feelsLike) + " c");
-
-      // Col 3: Wind
-      //RenderText(colW * 2 + 10, yCenter - 40, &FreeMonoBold12pt7b, GxEPD_BLACK, "Wind Info:");
-      RenderTitleText(colW * 2 + 10, yCenter - 60, "Wind :");
-      RenderPrimaryValue(colW * 2 + 10, yCenter - 20, String(currentWeather.windSpeed) + " km/h");
-      RenderTitleText(colW * 2 + 10, yCenter + 20, "Gust:");
-      RenderSecondaryValue(colW * 2 + 10, yCenter + 30, String(currentWeather.windGust));
-      
-      // Arrow
-      //Convert the Arrow into an Triangle inside a circle radius 30
-      drawWindDirection(colW, yCenter);
-
-      // Col 4: Humidity & Rain
-      RenderTitleText(colW * 3 + 10, yCenter - 60, "Humidity");
-      RenderSecondaryValue(colW * 3 + 10, yCenter - 20, String(currentWeather.humidity) + "%");
-      RenderTitleText(colW * 3 + 10, yCenter + 20, "Rain Prob:");
-      RenderSecondaryValue(colW * 3 + 10, yCenter + 50, String(currentWeather.precipitationProbability) + "%");
-
-      // Col 5: UV - pressure
-      RenderTitleText(colW * 4 + 10, yCenter - 60, "UV Index:");
-      RenderSecondaryValue(colW * 4 + 10, yCenter - 20, String(currentWeather.uvIndex));
-      RenderTitleText(colW * 4 + 10, yCenter + 20, "Pressure:");
-      RenderSecondaryValue(colW * 4 + 10, yCenter + 50, String(currentWeather.pressure) + " hPa");
-      
-      // --- Test Render All Icons (Bottom 3rd) ---
-      int testY = 350;
-      int testX = 10;
-      int spacing = 100;
-      
-      const char* testIcons[] = {
-        "sunny", "partly_cloudy", "cloudy", "rain", 
-        "snow", "thunderstorm", "fog", "wind"
-      };
-      
-      for(int i=0; i<8; i++) {
-          weatherIcons.drawWeatherIcon(testIcons[i], testX + i*spacing, testY);
-          // Optional: Label
-          display.setCursor(testX + i*spacing, testY + 100);
-          display.print(testIcons[i]);
-      }
-      
-    } else {
-      display.setFont(&FreeMonoBold24pt7b);
-      display.setTextColor(GxEPD_BLACK);
-      display.setCursor(50, 100);
-      display.println("No Weather Data");
-    }
-  }
-  while (display.nextPage());
-  
-  Serial.println("Paged rendering complete - display should show content");
+  displayHandler.init();
+  displayHandler.drawWeather(currentWeather, dailyForecasts, hourlyData);
 }
-
-
 
 void loop() {
 }
