@@ -3,24 +3,16 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
-#include <PNGdec.h>
-#include <FS.h>
-#include <LittleFS.h>
 #include "secrets.h"
 #include <epd7c/GxEPD2_730c_GDEP073E01.h>
+#include "WeatherIcons.h"
 
 // Forward declaration
 void ListWifiAPs();
 
-// Icon handling
-PNG png;
-uint16_t* iconBuffer = NULL;
-int iconWidth = 0;
-int iconHeight = 0;
-
 struct WeatherData {
   String conditionText;
-  String iconUri;
+  String iconName;
   float temp;
   float feelsLike;
   float windSpeed;
@@ -53,101 +45,8 @@ WeatherData currentWeather;
 // We should use a smaller page height (HEIGHT / 4) to avoid RAM overflow on ESP32.
 // Reducing page height further to save RAM for other tasks
 GxEPD2_7C<GxEPD2_730c_GDEP073E01, GxEPD2_730c_GDEP073E01::HEIGHT / 8> display(GxEPD2_730c_GDEP073E01(EPD_CS, EPD_DC, EPD_RST, EPD_BUSY));
+WeatherIcons weatherIcons(display);
 
-uint16_t getClosestEpdColor(uint8_t r, uint8_t g, uint8_t b) {
-  // 1. Detect Pale Colors (that would otherwise be White or Gray)
-  // Pale Yellow (Sun): High R, High G, slightly lower B
-  // Example: (255, 255, 230) -> Yellow
-  if (r > 220 && g > 220 && b < (min(r, g) - 10)) {
-      return GxEPD_YELLOW;
-  }
-  
-  // Pale Blue (Sky/Rain): High B, slightly lower R/G
-  // Example: (230, 230, 255) -> Blue
-  if (b > 220 && b > (max(r, g) + 10)) {
-      return GxEPD_BLUE;
-  }
-
-  // 2. Check for White / Bright Background
-  // Relaxed threshold to catch off-white backgrounds and anti-aliasing
-  if (r > 200 && g > 200 && b > 200) return GxEPD_WHITE;
-  
-  // 3. Calculate Chroma (Saturation proxy)
-  uint8_t minVal = min(r, min(g, b));
-  uint8_t maxVal = max(r, max(g, b));
-  uint8_t delta = maxVal - minVal;
-  
-  // 4. Handle Grayscale (Clouds, Fog, etc.)
-  // If saturation is low, map to Black (for clouds)
-  // Lowered threshold to 20 to avoid eating subtle colors
-  if (delta < 20) { 
-     return GxEPD_BLACK;
-  }
-  
-  // 5. Handle Color
-  // Remove the white component and scale up to maximize saturation.
-  int r_c = r - minVal;
-  int g_c = g - minVal;
-  int b_c = b - minVal;
-  
-  if (delta > 0) {
-      float scale = 255.0 / delta;
-      r_c = (int)(r_c * scale);
-      g_c = (int)(g_c * scale);
-      b_c = (int)(b_c * scale);
-  }
-  
-  // Compare against saturated palette (excluding White)
-  struct Color { int r, g, b; uint16_t code; };
-  // 6-Color Palette (No Orange)
-  Color palette[] = {
-    {0, 0, 0, GxEPD_BLACK},
-    {0, 255, 0, GxEPD_GREEN},
-    {0, 0, 255, GxEPD_BLUE},
-    {255, 0, 0, GxEPD_RED},
-    {255, 255, 0, GxEPD_YELLOW}
-  };
-  
-  uint16_t bestColor = GxEPD_BLACK;
-  long minDist = 2000000;
-  
-  for (int i = 0; i < 5; i++) {
-    long dist = ((long)r_c - palette[i].r) * ((long)r_c - palette[i].r) +
-                ((long)g_c - palette[i].g) * ((long)g_c - palette[i].g) +
-                ((long)b_c - palette[i].b) * ((long)b_c - palette[i].b);
-    if (dist < minDist) {
-      minDist = dist;
-      bestColor = palette[i].code;
-    }
-  }
-  return bestColor;
-}
-
-int PNGDraw(PNGDRAW *pDraw) {
-  // Serial.printf("PNGDraw: y=%d, w=%d\n", pDraw->y, pDraw->iWidth);
-  uint16_t lineBuffer[pDraw->iWidth];
-  
-  // Convert to RGB565, blending with white background (0xFFFFFF)
-  png.getLineAsRGB565(pDraw, lineBuffer, PNG_RGB565_LITTLE_ENDIAN, 0xFFFFFF);
-  
-  int y = pDraw->y;
-  if (iconBuffer == NULL) return 0; // Abort if no buffer
-  
-  for (int x = 0; x < pDraw->iWidth; x++) {
-     uint16_t color = lineBuffer[x];
-     // RGB565 to RGB888 extraction
-     uint8_t r = (color & 0xF800) >> 8;
-     uint8_t g = (color & 0x07E0) >> 3;
-     uint8_t b = (color & 0x001F) << 3;
-     
-     if (y < iconHeight && x < iconWidth) {
-       iconBuffer[y * iconWidth + x] = getClosestEpdColor(r, g, b);
-     }
-  }
-  return 1; // Return 1 to continue decoding
-}
-
-// Helper to extract condition name from URI
 // e.g. "https://maps.gstatic.com/weather/v1/partly_clear.png" -> "partly_clear"
 String getIconNameFromUri(String uri) {
   int lastSlash = uri.lastIndexOf('/');
@@ -155,125 +54,9 @@ String getIconNameFromUri(String uri) {
   if (lastSlash != -1 && dot != -1 && dot > lastSlash) {
     return uri.substring(lastSlash + 1, dot);
   }
-  return "";
-}
-
-bool loadIconFromFS(String iconName) {
-  String filename = "/" + iconName + ".png";
-  if (!LittleFS.exists(filename)) {
-    Serial.println("Icon not found in FS: " + filename);
-    return false;
-  }
-  
-  File file = LittleFS.open(filename, "r");
-  if (!file) {
-    Serial.println("Failed to open file: " + filename);
-    return false;
-  }
-  
-  int len = file.size();
-  Serial.printf("Loading icon from FS: %s (%d bytes)\n", filename.c_str(), len);
-  
-  uint8_t *pngData = (uint8_t*)malloc(len);
-  if (pngData) {
-    file.read(pngData, len);
-    file.close();
-    
-    int rc = png.openRAM(pngData, len, PNGDraw);
-    if (rc == PNG_SUCCESS) {
-      iconWidth = png.getWidth();
-      iconHeight = png.getHeight();
-      Serial.printf("Icon size: %dx%d\n", iconWidth, iconHeight);
-      
-      if (iconBuffer) free(iconBuffer);
-      iconBuffer = (uint16_t*)malloc(iconWidth * iconHeight * sizeof(uint16_t));
-      
-      if (iconBuffer) {
-        // Initialize buffer to White
-        for(int i=0; i<iconWidth*iconHeight; i++) iconBuffer[i] = GxEPD_WHITE;
-        
-        rc = png.decode(NULL, 0);
-        Serial.printf("Decode result: %d\n", rc);
-      }
-      free(pngData);
-      return true;
-    } else {
-       free(pngData);
-    }
-  }
-  return false;
-}
-
-void downloadIcon(String url) {
-  // Try to load from FS first
-  String iconName = getIconNameFromUri(url);
-  if (iconName.length() > 0) {
-    if (loadIconFromFS(iconName)) {
-      Serial.println("Loaded icon from local storage.");
-      return;
-    }
-  }
-
-  if (WiFi.status() != WL_CONNECTED) return;
-  
-  Serial.println("Downloading icon: " + url);
-  WiFiClientSecure client;
-  client.setInsecure();
-  HTTPClient http;
-  http.begin(client, url);
-  
-  int httpCode = http.GET();
-  if (httpCode == HTTP_CODE_OK) {
-    int len = http.getSize();
-    if (len > 0) {
-      uint8_t *pngData = (uint8_t*)malloc(len);
-      if (pngData) {
-        WiFiClient *stream = http.getStreamPtr();
-        // Read with a loop to ensure we get all data
-        int totalRead = 0;
-        while (totalRead < len && client.connected()) {
-            int available = stream->available();
-            if (available) {
-                int read = stream->read(pngData + totalRead, len - totalRead);
-                if (read > 0) totalRead += read;
-            }
-            delay(10);
-        }
-        
-        if (totalRead == len) {
-          int rc = png.openRAM(pngData, len, PNGDraw);
-          if (rc == PNG_SUCCESS) {
-            iconWidth = png.getWidth();
-            iconHeight = png.getHeight();
-            Serial.printf("Icon size: %dx%d\n", iconWidth, iconHeight);
-            
-            if (iconBuffer) free(iconBuffer);
-            iconBuffer = (uint16_t*)malloc(iconWidth * iconHeight * sizeof(uint16_t));
-            
-            if (iconBuffer) {
-              // Initialize buffer to White
-              for(int i=0; i<iconWidth*iconHeight; i++) iconBuffer[i] = GxEPD_WHITE;
-              
-              rc = png.decode(NULL, 0);
-              Serial.printf("Decode result: %d\n", rc);
-            } else {
-              Serial.println("Failed to allocate iconBuffer");
-            }
-          } else {
-             Serial.printf("PNG openRAM failed: %d\n", rc);
-          }
-        } else {
-            Serial.printf("Download incomplete: %d/%d\n", totalRead, len);
-        }
-        free(pngData);
-      } else {
-          Serial.println("Malloc failed for pngData");
-      }
-    }
-  } else {
-    Serial.printf("Icon download failed: %d\n", httpCode);
-  }
-  http.end();
+  // If no extension, maybe it's just the name
+  if (lastSlash != -1) return uri.substring(lastSlash + 1);
+  return uri;
 }
 
 void connectToWiFi() {
@@ -351,7 +134,9 @@ String getAPIData(String url) {
 
 void updateCurrentWeather(JsonObject hourly) {
   currentWeather.conditionText = hourly["weatherCondition"]["description"]["text"].as<String>();
-  currentWeather.iconUri = hourly["weatherCondition"]["iconBaseUri"].as<String>() + ".png";
+  String uri = hourly["weatherCondition"]["iconBaseUri"].as<String>();
+  currentWeather.iconName = getIconNameFromUri(uri);
+  
   currentWeather.temp = hourly["temperature"]["degrees"];
   currentWeather.feelsLike = hourly["feelsLikeTemperature"]["degrees"];
   currentWeather.windSpeed = hourly["wind"]["speed"]["value"];
@@ -368,7 +153,7 @@ void updateCurrentWeather(JsonObject hourly) {
   
   Serial.println("--- Parsed Weather Data ---");
   Serial.println("Condition: " + currentWeather.conditionText);
-  Serial.println("Icon URI: " + currentWeather.iconUri);
+  Serial.println("Icon Name: " + currentWeather.iconName);
   Serial.println("Temp: " + String(currentWeather.temp));
   Serial.println("Feels Like: " + String(currentWeather.feelsLike));
   Serial.println("Wind: " + String(currentWeather.windSpeed) + " km/h, Dir: " + String(currentWeather.windDirection));
@@ -376,8 +161,6 @@ void updateCurrentWeather(JsonObject hourly) {
   Serial.println("Rain Prob: " + String(currentWeather.precipitationProbability) + "%");
   Serial.println("UV: " + String(currentWeather.uvIndex));
   Serial.println("Pressure: " + String(currentWeather.pressure));
-  
-  downloadIcon(currentWeather.iconUri);
 }
 
 void getWeatherForcastData(int hours = 24) {
@@ -591,20 +374,11 @@ void setup() {
   Serial.println();
   Serial.println("--- Test Start: Paged Rendering with Fonts ---");
   
-  // Initialize LittleFS
-  if(!LittleFS.begin(true)){
-      Serial.println("LittleFS Mount Failed");
-      return;
-  }
-
   // Connect to WiFi and get weather data
   connectToWiFi();
 
   //getWeatherForcastData();
   getWeatherCurrentData();
-
-  // Skip displaying for now while debugging api.
-  //return;
 
   // Initialize display
   Serial.println("Initializing display...");
@@ -634,20 +408,9 @@ void setup() {
 
       // Col 1: Condition (Icon + Text)
       // Icon
-      if (iconBuffer) {
-        int iconX = colW * 0 + 20;
-        int iconY = 20;
-        for (int y = 0; y < iconHeight; y++) {
-          for (int x = 0; x < iconWidth; x++) {
-            display.drawPixel(iconX + x, iconY + y, iconBuffer[y * iconWidth + x]);
-          }
-        }
-      } else {
-        display.drawRect(colW * 0 + 20, 20, 90, 90, GxEPD_BLACK);
-        display.setCursor(colW * 0 + 30, 80);
-        display.setFont(NULL);
-        display.print("Icon");
-      }
+      int iconX = colW * 0 + 20;
+      int iconY = 20;
+      weatherIcons.drawWeatherIcon(currentWeather.iconName, iconX, iconY);
       
       // Text
       display.setCursor(colW * 0 + 5, 130);
