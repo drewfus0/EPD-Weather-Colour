@@ -237,7 +237,7 @@ void Display::drawWeather(const WeatherData& current, const DailyForecast daily[
       
       // Arrow
       //Convert the Arrow into an Triangle inside a circle radius 30
-      drawWindDirection(colW * 2 + 90, yCenter + 30, 30, current.windDirection);
+      drawWindDirection(colW * 2 + 120, yCenter + 30, 30, current.windDirection);
 
       // Col 4: Humidity & Rain
       RenderTitleText(colW * 3 + 10, yCenter - 60, "Humidity");

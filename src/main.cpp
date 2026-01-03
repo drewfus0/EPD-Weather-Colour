@@ -15,7 +15,7 @@ HourlyData hourlyData[24];
 
 Display displayHandler;
 
-void initMockForecastData() {
+void getMockForecastData() {
   // Mock 3-day forecast
   dailyForecasts[0] = {"Tomorrow", "partly_cloudy", "Partly Cloudy", 22.5, 14.0};
   dailyForecasts[1] = {"Wednesday", "rain", "Rain", 18.0, 12.5};
@@ -149,12 +149,26 @@ void updateCurrentWeather(JsonObject hourly) {
   Serial.println("Pressure: " + String(currentWeather.pressure));
 }
 
-void getWeatherForcastData(int hours = 24) {
+String getDayName(int year, int month, int day) {
+    // Zeller's congruence
+    if (month < 3) {
+        month += 12;
+        year -= 1;
+    }
+    int k = year % 100;
+    int j = year / 100;
+    int h = (day + 13 * (month + 1) / 5 + k + k / 4 + j / 4 + 5 * j) % 7;
+    
+    String days[] = {"Saturday", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"};
+    return days[h];
+}
+
+void getDailyForecastData() {
   if (WiFi.status() == WL_CONNECTED) {
-    String url = "https://weather.googleapis.com/v1/forecast/hours:lookup?key=" + String(GOOGLE_API_KEY) 
+    String url = "https://weather.googleapis.com/v1/forecast/days:lookup?key=" + String(GOOGLE_API_KEY) 
       + "&location.latitude=" + String(LATITUDE) 
       + "&location.longitude=" + String(LONGITUDE) 
-      + "&hours=" + String(hours)
+      + "&days=3"
       + "&unitsSystem=METRIC";
     
     Serial.println("Requesting URL: " + url);
@@ -166,8 +180,112 @@ void getWeatherForcastData(int hours = 24) {
     int httpResponseCode = http.GET();
     
     if (httpResponseCode > 0) {
+      String payload = http.getString();
       Serial.println("HTTP Response code: " + String(httpResponseCode));
-      Serial.println("Payload size: " + String(http.getSize()) + " bytes");
+      Serial.println("Daily Forecast Payload: " + payload);
+      
+      JsonDocument filter;
+      filter["forecastDays"][0]["displayDate"] = true;
+      filter["forecastDays"][0]["maxTemperature"]["degrees"] = true;
+      filter["forecastDays"][0]["minTemperature"]["degrees"] = true;
+      filter["forecastDays"][0]["daytimeForecast"]["weatherCondition"]["description"]["text"] = true;
+      filter["forecastDays"][0]["daytimeForecast"]["weatherCondition"]["iconBaseUri"] = true;
+
+      JsonDocument doc;
+      DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
+
+      if (error) {
+        Serial.print("deserializeJson() failed: ");
+        Serial.println(error.c_str());
+      } else {
+        JsonArray forecasts = doc["forecastDays"];
+        for(int i=0; i<3 && i<forecasts.size(); i++) {
+            JsonObject f = forecasts[i];
+            int y = f["displayDate"]["year"];
+            int m = f["displayDate"]["month"];
+            int d = f["displayDate"]["day"];
+            
+            dailyForecasts[i].dayName = getDayName(y, m, d);
+            dailyForecasts[i].tempHigh = f["maxTemperature"]["degrees"];
+            dailyForecasts[i].tempLow = f["minTemperature"]["degrees"];
+            dailyForecasts[i].conditionText = f["daytimeForecast"]["weatherCondition"]["description"]["text"].as<String>();
+            
+            String uri = f["daytimeForecast"]["weatherCondition"]["iconBaseUri"].as<String>();
+            dailyForecasts[i].iconName = getIconNameFromUri(uri);
+            
+            Serial.printf("Day %d: %s, High: %.1f, Low: %.1f, Icon: %s\n", i, dailyForecasts[i].dayName.c_str(), dailyForecasts[i].tempHigh, dailyForecasts[i].tempLow, dailyForecasts[i].iconName.c_str());
+        }
+      }
+    } else {
+      Serial.print("Error code: ");
+      Serial.println(httpResponseCode);
+    }
+    http.end();
+  } else {
+    Serial.println("WiFi Disconnected");
+  }
+}
+
+void getHourlyForecastData() {
+  if (WiFi.status() == WL_CONNECTED) {
+    String url = "https://weather.googleapis.com/v1/forecast/hours:lookup?key=" + String(GOOGLE_API_KEY) 
+      + "&location.latitude=" + String(LATITUDE) 
+      + "&location.longitude=" + String(LONGITUDE) 
+      + "&hours=24"
+      + "&unitsSystem=METRIC";
+    
+    Serial.println("Requesting URL: " + url);
+
+    WiFiClientSecure client;
+    client.setInsecure();
+    HTTPClient http;
+    http.begin(client, url);
+    int httpResponseCode = http.GET();
+    
+    if (httpResponseCode > 0) {
+      String payload = http.getString();
+      Serial.println("HTTP Response code: " + String(httpResponseCode));
+      // Serial.println("Hourly Forecast Payload: " + payload);
+      /*
+      Serial.println("Hourly Forecast Payload (Chunked):");
+      int len = payload.length();
+      for (int i = 0; i < len; i += 1000) {
+        Serial.print(payload.substring(i, min(i + 1000, len)));
+        delay(10); // Small delay to prevent buffer overflow
+      }
+      Serial.println();
+      */
+      
+      JsonDocument filter;
+      filter["forecastHours"][0]["interval"]["startTime"] = true; // "2026-01-03T17:00:00Z"
+      filter["forecastHours"][0]["temperature"]["degrees"] = true;
+      filter["forecastHours"][0]["precipitation"]["probability"]["percent"] = true;
+
+      JsonDocument doc;
+      DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
+
+      if (error) {
+        Serial.print("deserializeJson() failed: ");
+        Serial.println(error.c_str());
+      } else {
+        JsonArray forecasts = doc["forecastHours"];
+        for(int i=0; i<24 && i<forecasts.size(); i++) {
+            JsonObject f = forecasts[i];
+            String timeStr = f["interval"]["startTime"].as<String>();
+            // Extract hour from ISO string (e.g. 2026-01-03T17:00:00Z)
+            int tIndex = timeStr.indexOf('T');
+            if(tIndex != -1) {
+                hourlyData[i].hour = timeStr.substring(tIndex+1, tIndex+3).toInt();
+            }
+            
+            hourlyData[i].temp = f["temperature"]["degrees"];
+            hourlyData[i].rainProb = f["precipitation"]["probability"]["percent"];
+        }
+        Serial.println("Hourly data updated.");
+      }
+    } else {
+      Serial.print("Error code: ");
+      Serial.println(httpResponseCode);
     }
     http.end();
   } else {
@@ -363,10 +481,13 @@ void setup() {
   
   // Connect to WiFi and get weather data
   connectToWiFi();
-
+  
   //getWeatherForcastData();
   getMOCKWeatherCurrentData();
-  initMockForecastData();
+  //initMockForecastData();
+  
+  getDailyForecastData();
+  getHourlyForecastData();
 
   displayHandler.init();
   displayHandler.drawWeather(currentWeather, dailyForecasts, hourlyData);
