@@ -29,8 +29,25 @@ WeatherData currentWeather;
 
 #include <GxEPD2_7C.h>
 #include <Adafruit_GFX.h>
+#include <Fonts/FreeMonoBold9pt7b.h>
+#include <Fonts/FreeMonoBold12pt7b.h>
+#include <Fonts/FreeMonoBold18pt7b.h>
 #include <Fonts/FreeMonoBold24pt7b.h>
+
+#include <Fonts/FreeSans9pt7b.h>
+#include <Fonts/FreeSans12pt7b.h>
 #include <Fonts/FreeSans18pt7b.h>
+#include <Fonts/FreeSans24pt7b.h>
+
+#include <Fonts/FreeMono9pt7b.h>
+#include <Fonts/FreeMono12pt7b.h>
+#include <Fonts/FreeMono18pt7b.h>
+#include <Fonts/FreeMono24pt7b.h>
+
+#include <Fonts/FreeSansBold9pt7b.h>
+#include <Fonts/FreeSansBold12pt7b.h>
+#include <Fonts/FreeSansBold18pt7b.h>
+#include <Fonts/FreeSansBold24pt7b.h>
 
 // Pin definitions based on your wiring
 #define EPD_BUSY 25
@@ -368,10 +385,92 @@ void getWeatherCurrentData() {
   }
 }
 
+void RenderText(int16_t x, int16_t y, const GFXfont *font, uint16_t color, String text, int maxCharsPerLine = 12) {
+  display.setFont(font);
+  display.setTextColor(color);
+  display.setCursor(x, y);
+
+  int currentLineLen = 0;
+  int start = 0;
+  int end = text.indexOf(' ');
+
+  while (end != -1) {
+    String word = text.substring(start, end);
+    
+    // Check if adding this word exceeds the line limit
+    // We only wrap if it's not the first word on the line
+    if (currentLineLen + word.length() > maxCharsPerLine && currentLineLen > 0) {
+      display.println();
+      currentLineLen = 0;
+    }
+    
+    // Add space before word if it's not the start of a line
+    if (currentLineLen > 0) {
+      display.print(" ");
+      currentLineLen++;
+    }
+    
+    display.print(word);
+    currentLineLen += word.length();
+    
+    start = end + 1;
+    end = text.indexOf(' ', start);
+  }
+  
+  // Process the remaining part of the string (last word)
+  String lastWord = text.substring(start);
+  if (lastWord.length() > 0) {
+    if (currentLineLen + lastWord.length() > maxCharsPerLine && currentLineLen > 0) {
+      display.println();
+    } else if (currentLineLen > 0) {
+      display.print(" ");
+    }
+    display.print(lastWord);
+  }
+}
+
+void RenderTitleText(int16_t x, int16_t y, String text) {
+  RenderText(x, y, &FreeMono9pt7b, GxEPD_BLACK, text, 15); // Assume title max 20 chars per line
+}
+
+void RenderPrimaryValue(int16_t x, int16_t y, String text) {
+  RenderText(x, y, &FreeSansBold18pt7b, GxEPD_BLUE, text, 15); // Assume subtitle max 30 chars per line
+}
+
+void RenderSecondaryValue(int16_t x, int16_t y, String text) {
+  RenderText(x, y, &FreeSansBold12pt7b, GxEPD_BLACK, text, 20); // Assume subtitle max 30 chars per line
+}
+
+void drawWindDirection(int colW, int yCenter)
+{
+  int cx = colW * 2 + 70;
+  int cy = yCenter + 80;
+  int r = 30;
+  display.drawCircle(cx, cy, r, GxEPD_BLACK);
+
+  float angle = (currentWeather.windDirection - 90) * PI / 180.0;
+
+  // Calculate triangle vertices
+  // Tip
+  int x1 = cx + (r - 6) * cos(angle);
+  int y1 = cy + (r - 6) * sin(angle);
+
+  // Back Left (offset by ~150 degrees)
+  int x2 = cx + (r - 6) * cos(angle + 2.6);
+  int y2 = cy + (r - 6) * sin(angle + 2.6);
+
+  // Back Right (offset by ~-150 degrees)
+  int x3 = cx + (r - 6) * cos(angle - 2.6);
+  int y3 = cy + (r - 6) * sin(angle - 2.6);
+
+  display.fillTriangle(x1, y1, x2, y2, x3, y3, GxEPD_RED);
+}
+
 void setup() {
   Serial.begin(115200);
-  delay(2000);
+  delay(10000);
   Serial.println();
+  
   Serial.println("--- Test Start: Paged Rendering with Fonts ---");
   
   // Connect to WiFi and get weather data
@@ -400,7 +499,7 @@ void setup() {
     if (currentWeather.valid) {
       int topH = 160;
       int w = 800;
-      int colW = w / 6;
+      int colW = w / 5;
       int yCenter = topH / 2;
 
       // Draw separator line
@@ -413,55 +512,57 @@ void setup() {
       weatherIcons.drawWeatherIcon(currentWeather.iconName, iconX, iconY);
       
       // Text
-      display.setCursor(colW * 0 + 5, 130);
+      display.setCursor(colW * 0 + 10, 130);
       // Wrap text if too long? For now just print
       String cond = currentWeather.conditionText;
       if (cond.length() > 15) cond = cond.substring(0, 15);
       display.print(cond);
 
       // Col 2: Temp
-      display.setFont(&FreeSans18pt7b);
-      display.setTextColor(GxEPD_RED);
-      display.setCursor(colW * 1 + 10, yCenter + 10);
-      display.print(currentWeather.temp, 1); display.print("C");
-      
-      display.setFont(NULL);
-      display.setTextColor(GxEPD_BLACK);
-      display.setCursor(colW * 1 + 10, yCenter + 40);
-      display.print("Feels: "); display.print(currentWeather.feelsLike, 1);
+      RenderTitleText(colW * 1 + 10, yCenter - 60, "Temperature");
+      RenderPrimaryValue(colW * 1 + 10, yCenter - 20, String(currentWeather.temp) + " c");
+      RenderTitleText(colW * 1 + 10, yCenter + 20, "Feels Like:");
+      RenderSecondaryValue(colW * 1 + 10, yCenter + 50, String(currentWeather.feelsLike) + " c");
 
       // Col 3: Wind
-      display.setCursor(colW * 2 + 10, yCenter - 20);
-      display.print("Wind: "); display.print(currentWeather.windSpeed, 1);
-      display.setCursor(colW * 2 + 10, yCenter);
-      display.print("Gust: "); display.print(currentWeather.windGust, 1);
+      //RenderText(colW * 2 + 10, yCenter - 40, &FreeMonoBold12pt7b, GxEPD_BLACK, "Wind Info:");
+      RenderTitleText(colW * 2 + 10, yCenter - 60, "Wind :");
+      RenderPrimaryValue(colW * 2 + 10, yCenter - 20, String(currentWeather.windSpeed) + " km/h");
+      RenderTitleText(colW * 2 + 10, yCenter + 20, "Gust:");
+      RenderSecondaryValue(colW * 2 + 10, yCenter + 30, String(currentWeather.windGust));
       
       // Arrow
-      int cx = colW * 2 + 60;
-      int cy = yCenter + 40;
-      int r = 15;
-      display.drawCircle(cx, cy, r, GxEPD_BLACK);
-      float angle = (currentWeather.windDirection - 90) * PI / 180.0;
-      display.drawLine(cx, cy, cx + r * cos(angle), cy + r * sin(angle), GxEPD_RED);
+      //Convert the Arrow into an Triangle inside a circle radius 30
+      drawWindDirection(colW, yCenter);
 
       // Col 4: Humidity & Rain
-      display.setCursor(colW * 3 + 10, yCenter - 10);
-      display.print("Hum: "); display.print(currentWeather.humidity); display.print("%");
-      display.setCursor(colW * 3 + 10, yCenter + 20);
-      display.print("Rain: "); display.print(currentWeather.precipitationProbability); display.print("%");
+      RenderTitleText(colW * 3 + 10, yCenter - 60, "Humidity");
+      RenderSecondaryValue(colW * 3 + 10, yCenter - 20, String(currentWeather.humidity) + "%");
+      RenderTitleText(colW * 3 + 10, yCenter + 20, "Rain Prob:");
+      RenderSecondaryValue(colW * 3 + 10, yCenter + 50, String(currentWeather.precipitationProbability) + "%");
 
-      // Col 5: UV
-      display.setCursor(colW * 4 + 10, yCenter);
-      display.print("UV Index: "); 
-      display.setFont(&FreeSans18pt7b);
-      display.print(currentWeather.uvIndex);
-
-      // Col 6: Pressure
-      display.setFont(NULL);
-      display.setCursor(colW * 5 + 10, yCenter);
-      display.print("Press:"); 
-      display.setCursor(colW * 5 + 10, yCenter + 20);
-      display.print(currentWeather.pressure); display.print("hPa");
+      // Col 5: UV - pressure
+      RenderTitleText(colW * 4 + 10, yCenter - 60, "UV Index:");
+      RenderSecondaryValue(colW * 4 + 10, yCenter - 20, String(currentWeather.uvIndex));
+      RenderTitleText(colW * 4 + 10, yCenter + 20, "Pressure:");
+      RenderSecondaryValue(colW * 4 + 10, yCenter + 50, String(currentWeather.pressure) + " hPa");
+      
+      // --- Test Render All Icons (Bottom 3rd) ---
+      int testY = 350;
+      int testX = 10;
+      int spacing = 100;
+      
+      const char* testIcons[] = {
+        "sunny", "partly_cloudy", "cloudy", "rain", 
+        "snow", "thunderstorm", "fog", "wind"
+      };
+      
+      for(int i=0; i<8; i++) {
+          weatherIcons.drawWeatherIcon(testIcons[i], testX + i*spacing, testY);
+          // Optional: Label
+          display.setCursor(testX + i*spacing, testY + 100);
+          display.print(testIcons[i]);
+      }
       
     } else {
       display.setFont(&FreeMonoBold24pt7b);
@@ -474,6 +575,8 @@ void setup() {
   
   Serial.println("Paged rendering complete - display should show content");
 }
+
+
 
 void loop() {
 }

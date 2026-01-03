@@ -34,6 +34,7 @@ void WeatherIcons::drawSun(int x, int y, int radius) {
     int spokeLen = radius / 2; // Scale spoke length with sun size
     int gap = 6;
     
+
     for (int i = 0; i < numSpokes; i++) {
         float angle = i * (2 * PI / numSpokes);
         int x1 = x + (radius + gap) * cos(angle);
@@ -41,6 +42,7 @@ void WeatherIcons::drawSun(int x, int y, int radius) {
         int x2 = x + (radius + gap + spokeLen) * cos(angle);
         int y2 = y + (radius + gap + spokeLen) * sin(angle);
         
+        drawThickLine(x1, y1, x2, y2, 5, WI_RED);
         // Draw spoke (Yellow)
         drawThickLine(x1, y1, x2, y2, 3, WI_YELLOW);
     }
@@ -134,42 +136,23 @@ void WeatherIcons::drawWind(int x, int y) {
     // Curling lines
     // Top line
     drawThickLine(x, y, x+35, y, 3, WI_BLUE);
-    // Curl back: Arc from (x+35, y) curling up and back
-    // Approximate arc with lines
-    // Center of curl roughly at x+35, y-10?
-    // Python: draw.arc([x+25, y-10, x+45, y+10], start=270, end=100, fill=BLUE, width=3)
-    // Bounding box 20x20. Center (x+35, y). Radius 10.
-    // Start 270 (Top) -> End 100 (Right-ish)
     
-    int cx = x + 35;
-    int cy = y;
-    int r = 10;
-    
-    for (int angle = 270; angle >= 100; angle -= 10) { // Python angles are clockwise? No, standard math is CCW. PIL is clockwise from 3 o'clock?
-        // PIL arc: start/end in degrees, 0 is 3 o'clock, clockwise.
-        // 270 is 6 o'clock (bottom). 100 is slightly past 6 o'clock?
-        // Wait, PIL 0 is 3 o'clock. 90 is 6 o'clock. 270 is 12 o'clock (top).
-        // So 270 to 100 (crossing 0/360) is Top -> Right -> Bottom -> Leftish.
-        // Let's just draw a simple hook.
-        
-        float rad = angle * PI / 180.0;
-        int px = cx + r * cos(rad);
-        int py = cy + r * sin(rad);
-        _display.drawPixel(px, py, WI_BLUE);
-    }
-    
-    // Let's just hardcode a hook shape for simplicity
     // Hook 1
-    _display.drawCircleHelper(x+35, y-5, 5, 1, WI_BLUE); // Top-Right quadrant
-    _display.drawCircleHelper(x+35, y-5, 5, 2, WI_BLUE); // Top-Left quadrant
+    // Draw concentric arcs for thickness
+    // Use mask 6 (2 | 4) for Right Half (Top-Right + Bottom-Right)
+    // This creates a ')' shape starting from the bottom (end of line) and curling up
+    for (int i = -1; i <= 1; i++) {
+        _display.drawCircleHelper(x+35, y-5, 5+i, 6, WI_BLUE); 
+    }
     
     // Bottom line offset
     int y2 = y + 20;
     int x2 = x + 15;
     drawThickLine(x2, y2, x2+35, y2, 3, WI_BLUE);
     // Hook 2
-    _display.drawCircleHelper(x2+35, y2-5, 5, 1, WI_BLUE);
-    _display.drawCircleHelper(x2+35, y2-5, 5, 2, WI_BLUE);
+    for (int i = -1; i <= 1; i++) {
+        _display.drawCircleHelper(x2+35, y2-5, 5+i, 6, WI_BLUE);
+    }
 }
 
 void WeatherIcons::drawWeatherIcon(String iconName, int x, int y) {
@@ -188,7 +171,7 @@ void WeatherIcons::drawWeatherIcon(String iconName, int x, int y) {
     }
     else if (iconName.indexOf("rain") != -1 || iconName.indexOf("showers") != -1) {
         drawCloud(x + 25, y + 45, 1.1);
-        drawRain(x + 35, y + 75);
+        drawRain(x + 27, y + 77);
     }
     else if (iconName.indexOf("snow") != -1 || iconName.indexOf("flurries") != -1) {
         drawCloud(x + 25, y + 45, 1.1);
