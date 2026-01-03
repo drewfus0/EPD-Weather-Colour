@@ -4,6 +4,8 @@
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <PNGdec.h>
+#include <FS.h>
+#include <LittleFS.h>
 #include "secrets.h"
 #include <epd7c/GxEPD2_730c_GDEP073E01.h>
 
@@ -53,25 +55,66 @@ WeatherData currentWeather;
 GxEPD2_7C<GxEPD2_730c_GDEP073E01, GxEPD2_730c_GDEP073E01::HEIGHT / 8> display(GxEPD2_730c_GDEP073E01(EPD_CS, EPD_DC, EPD_RST, EPD_BUSY));
 
 uint16_t getClosestEpdColor(uint8_t r, uint8_t g, uint8_t b) {
-  // Palette: Black, White, Green, Blue, Red, Yellow, Orange
-  struct Color { uint8_t r, g, b; uint16_t code; };
+  // 1. Detect Pale Colors (that would otherwise be White or Gray)
+  // Pale Yellow (Sun): High R, High G, slightly lower B
+  // Example: (255, 255, 230) -> Yellow
+  if (r > 220 && g > 220 && b < (min(r, g) - 10)) {
+      return GxEPD_YELLOW;
+  }
+  
+  // Pale Blue (Sky/Rain): High B, slightly lower R/G
+  // Example: (230, 230, 255) -> Blue
+  if (b > 220 && b > (max(r, g) + 10)) {
+      return GxEPD_BLUE;
+  }
+
+  // 2. Check for White / Bright Background
+  // Relaxed threshold to catch off-white backgrounds and anti-aliasing
+  if (r > 200 && g > 200 && b > 200) return GxEPD_WHITE;
+  
+  // 3. Calculate Chroma (Saturation proxy)
+  uint8_t minVal = min(r, min(g, b));
+  uint8_t maxVal = max(r, max(g, b));
+  uint8_t delta = maxVal - minVal;
+  
+  // 4. Handle Grayscale (Clouds, Fog, etc.)
+  // If saturation is low, map to Black (for clouds)
+  // Lowered threshold to 20 to avoid eating subtle colors
+  if (delta < 20) { 
+     return GxEPD_BLACK;
+  }
+  
+  // 5. Handle Color
+  // Remove the white component and scale up to maximize saturation.
+  int r_c = r - minVal;
+  int g_c = g - minVal;
+  int b_c = b - minVal;
+  
+  if (delta > 0) {
+      float scale = 255.0 / delta;
+      r_c = (int)(r_c * scale);
+      g_c = (int)(g_c * scale);
+      b_c = (int)(b_c * scale);
+  }
+  
+  // Compare against saturated palette (excluding White)
+  struct Color { int r, g, b; uint16_t code; };
+  // 6-Color Palette (No Orange)
   Color palette[] = {
     {0, 0, 0, GxEPD_BLACK},
-    {255, 255, 255, GxEPD_WHITE},
     {0, 255, 0, GxEPD_GREEN},
     {0, 0, 255, GxEPD_BLUE},
     {255, 0, 0, GxEPD_RED},
-    {255, 255, 0, GxEPD_YELLOW},
-    {255, 165, 0, GxEPD_ORANGE}
+    {255, 255, 0, GxEPD_YELLOW}
   };
   
-  uint16_t bestColor = GxEPD_WHITE;
-  long minDist = 200000; // Large number
+  uint16_t bestColor = GxEPD_BLACK;
+  long minDist = 2000000;
   
-  for (int i = 0; i < 7; i++) {
-    long dist = ((long)r - palette[i].r) * ((long)r - palette[i].r) +
-                ((long)g - palette[i].g) * ((long)g - palette[i].g) +
-                ((long)b - palette[i].b) * ((long)b - palette[i].b);
+  for (int i = 0; i < 5; i++) {
+    long dist = ((long)r_c - palette[i].r) * ((long)r_c - palette[i].r) +
+                ((long)g_c - palette[i].g) * ((long)g_c - palette[i].g) +
+                ((long)b_c - palette[i].b) * ((long)b_c - palette[i].b);
     if (dist < minDist) {
       minDist = dist;
       bestColor = palette[i].code;
@@ -104,7 +147,73 @@ int PNGDraw(PNGDRAW *pDraw) {
   return 1; // Return 1 to continue decoding
 }
 
+// Helper to extract condition name from URI
+// e.g. "https://maps.gstatic.com/weather/v1/partly_clear.png" -> "partly_clear"
+String getIconNameFromUri(String uri) {
+  int lastSlash = uri.lastIndexOf('/');
+  int dot = uri.lastIndexOf('.');
+  if (lastSlash != -1 && dot != -1 && dot > lastSlash) {
+    return uri.substring(lastSlash + 1, dot);
+  }
+  return "";
+}
+
+bool loadIconFromFS(String iconName) {
+  String filename = "/" + iconName + ".png";
+  if (!LittleFS.exists(filename)) {
+    Serial.println("Icon not found in FS: " + filename);
+    return false;
+  }
+  
+  File file = LittleFS.open(filename, "r");
+  if (!file) {
+    Serial.println("Failed to open file: " + filename);
+    return false;
+  }
+  
+  int len = file.size();
+  Serial.printf("Loading icon from FS: %s (%d bytes)\n", filename.c_str(), len);
+  
+  uint8_t *pngData = (uint8_t*)malloc(len);
+  if (pngData) {
+    file.read(pngData, len);
+    file.close();
+    
+    int rc = png.openRAM(pngData, len, PNGDraw);
+    if (rc == PNG_SUCCESS) {
+      iconWidth = png.getWidth();
+      iconHeight = png.getHeight();
+      Serial.printf("Icon size: %dx%d\n", iconWidth, iconHeight);
+      
+      if (iconBuffer) free(iconBuffer);
+      iconBuffer = (uint16_t*)malloc(iconWidth * iconHeight * sizeof(uint16_t));
+      
+      if (iconBuffer) {
+        // Initialize buffer to White
+        for(int i=0; i<iconWidth*iconHeight; i++) iconBuffer[i] = GxEPD_WHITE;
+        
+        rc = png.decode(NULL, 0);
+        Serial.printf("Decode result: %d\n", rc);
+      }
+      free(pngData);
+      return true;
+    } else {
+       free(pngData);
+    }
+  }
+  return false;
+}
+
 void downloadIcon(String url) {
+  // Try to load from FS first
+  String iconName = getIconNameFromUri(url);
+  if (iconName.length() > 0) {
+    if (loadIconFromFS(iconName)) {
+      Serial.println("Loaded icon from local storage.");
+      return;
+    }
+  }
+
   if (WiFi.status() != WL_CONNECTED) return;
   
   Serial.println("Downloading icon: " + url);
@@ -481,6 +590,12 @@ void setup() {
   delay(2000);
   Serial.println();
   Serial.println("--- Test Start: Paged Rendering with Fonts ---");
+  
+  // Initialize LittleFS
+  if(!LittleFS.begin(true)){
+      Serial.println("LittleFS Mount Failed");
+      return;
+  }
 
   // Connect to WiFi and get weather data
   connectToWiFi();
