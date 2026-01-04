@@ -6,9 +6,10 @@ Put InProgress in front of any you start.
 Feel Free to add to the end of this list with any suggestions you may have, this include you my friendly AI 😁👋.
 
 The Todo List:
-- detect when data fails and null(-999) data for temp actuals.
-- Add date/day to the screen.
-- add last update time.
+Done detect when data fails and null(-100) data for temp actuals.
+Done Add date/day to the screen.
+Done add last update time.
+
 - add horizontal grid lines.
 - add dots to temp line where min and max temps are, and label them.
 - add wifi config, local webpage, QR code for wifi ap and link to ipaddress\page for wifi config.

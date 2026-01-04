@@ -578,13 +578,17 @@ void setup() {
     int currentHour = timeinfo.tm_hour;
     for(int i=0; i<24; i++) {
         if(hourlyData[i].hour == currentHour) {
-            hourlyData[i].actualTemp = currentWeather.temp;
-            // Save updated hourly data to Flash
-            preferences.begin("weather", false);
-            preferences.putBytes("hourly", hourlyData, sizeof(hourlyData));
-            preferences.end();
-            
-            Serial.printf("Updated actual temp for hour %d: %.1f\n", currentHour, currentWeather.temp);
+            if (currentWeather.valid) {
+                hourlyData[i].actualTemp = currentWeather.temp;
+                // Save updated hourly data to Flash
+                preferences.begin("weather", false);
+                preferences.putBytes("hourly", hourlyData, sizeof(hourlyData));
+                preferences.end();
+                
+                Serial.printf("Updated actual temp for hour %d: %.1f\n", currentHour, currentWeather.temp);
+            } else {
+                Serial.printf("Current weather invalid, skipping actual temp update for hour %d\n", currentHour);
+            }
             break;
         }
     }

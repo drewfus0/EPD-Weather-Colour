@@ -1,4 +1,5 @@
 #include "Display.h"
+#include <time.h>
 
 #include <Fonts/FreeMonoBold9pt7b.h>
 #include <Fonts/FreeMonoBold12pt7b.h>
@@ -284,10 +285,28 @@ void Display::drawWeather(const WeatherData& current, const DailyForecast daily[
     display.fillScreen(GxEPD_WHITE);
     
     if (current.valid) {
-      int topH = 140;
+      int headerH = 25;
+      int topH = 140 + headerH;
       int w = 800;
       int colW = w / 5;
-      int yCenter = topH / 2;
+      int yCenter = headerH + (140 / 2);
+
+      // Draw Header (Date/Time)
+      struct tm timeinfo;
+      if(getLocalTime(&timeinfo)){
+        char timeStr[64];
+        strftime(timeStr, sizeof(timeStr), "%A %d %B %H:%M", &timeinfo);
+        
+        display.setFont(&FreeSansBold12pt7b);
+        display.setTextColor(GxEPD_BLACK);
+        int16_t tbx, tby; uint16_t tbw, tbh;
+        display.getTextBounds(timeStr, 0, 0, &tbx, &tby, &tbw, &tbh);
+        display.setCursor((w - tbw) / 2, headerH - 6);
+        display.print(timeStr);
+      }
+      
+      // Header separator
+      display.drawLine(0, headerH, w, headerH, GxEPD_BLACK);
 
       // Draw separator line
       display.drawLine(0, topH, w, topH, GxEPD_YELLOW);
@@ -297,10 +316,10 @@ void Display::drawWeather(const WeatherData& current, const DailyForecast daily[
       // Col 1: Condition (Icon + Text)
       // Icon
       int iconX = colW * 0 + 20;
-      int iconY = 20;
+      int iconY = 20 + headerH;
       weatherIcons.drawWeatherIcon(current.iconName, iconX, iconY);
       // Text
-      RenderSecondaryValue(colW * 0 + 10, 130, String(current.conditionText), 12);
+      RenderSecondaryValue(colW * 0 + 10, 130 + headerH, String(current.conditionText), 12);
 
       // Col 2: Temp
       RenderTitleText(colW * 1 + 10, yCenter - 60, "Temperature");
@@ -332,8 +351,8 @@ void Display::drawWeather(const WeatherData& current, const DailyForecast daily[
       RenderSecondaryValue(colW * 4 + 10, yCenter + 50, String(current.pressure) + " hPa");
       
       // bottom 2/3rds forcast / actuals
-      int bottomY = 160;
-      int bottomH = 320; // 480 - 160
+      int bottomY = 160 + headerH;
+      int bottomH = 320 - headerH;
       
       // Left 2/5ths = 320px
       drawDailyForecast(0, bottomY, 320, bottomH, daily);
