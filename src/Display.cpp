@@ -208,6 +208,8 @@ void Display::drawGraphs(int x, int y, int w, int h, const HourlyData hourly[]) 
         int py = originY - ((t - minAxis) * graphH / (maxAxis - minAxis));
         if (py >= y && py <= originY) {
             display.drawLine(originX - 5, py, originX, py, GxEPD_BLACK);
+            // Grid line
+            display.drawLine(originX, py, originX + graphW, py, GxEPD_YELLOW);
             display.setCursor(originX - 35, py + 5);
             display.print(String(t));
         }
