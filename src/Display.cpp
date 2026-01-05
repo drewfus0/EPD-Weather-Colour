@@ -182,9 +182,9 @@ void Display::drawGraphs(int x, int y, int w, int h, const HourlyData hourly[]) 
     else if (rawStep > 1) step = 2;
     else step = 1;
     
-    // 4. Align Min/Max to Step
-    int minAxis = floor(targetMin / step) * step;
-    int maxAxis = ceil(targetMax / step) * step;
+    // 4. Use exact range (+-5) for axis bounds, don't snap to tick steps
+    float minAxis = targetMin;
+    float maxAxis = targetMax;
     
     // Draw Axes
     display.drawLine(originX, y, originX, originY, GxEPD_BLACK); // Left Y axis (Temp)
@@ -202,7 +202,9 @@ void Display::drawGraphs(int x, int y, int w, int h, const HourlyData hourly[]) 
     }
     
     // Y Axis Labels (Temp) - Left side
-    for (int t = minAxis; t <= maxAxis; t += step) {
+    // Start from the first multiple of 'step' that is >= minAxis
+    int startTick = ceil(minAxis / step) * step;
+    for (int t = startTick; t <= maxAxis; t += step) {
         int py = originY - ((t - minAxis) * graphH / (maxAxis - minAxis));
         if (py >= y && py <= originY) {
             display.drawLine(originX - 5, py, originX, py, GxEPD_BLACK);
@@ -284,6 +286,63 @@ void Display::drawGraphs(int x, int y, int w, int h, const HourlyData hourly[]) 
         } else {
             prevX = -1;
         }
+    }
+
+    // Find Min/Max for Forecast (Red)
+    float minF = 100.0, maxF = -100.0;
+    int minF_idx = -1, maxF_idx = -1;
+    
+    for(int i=0; i<24; i++) {
+        if(hourly[i].temp > -99.0) {
+            if(hourly[i].temp < minF) { minF = hourly[i].temp; minF_idx = i; }
+            if(hourly[i].temp > maxF) { maxF = hourly[i].temp; maxF_idx = i; }
+        }
+    }
+    
+    // Find Min/Max for History (Green)
+    float minH = 100.0, maxH = -100.0;
+    int minH_idx = -1, maxH_idx = -1;
+    
+    for(int i=0; i<24; i++) {
+        if(hourly[i].actualTemp > -99.0) {
+            if(hourly[i].actualTemp < minH) { minH = hourly[i].actualTemp; minH_idx = i; }
+            if(hourly[i].actualTemp > maxH) { maxH = hourly[i].actualTemp; maxH_idx = i; }
+        }
+    }
+    
+    display.setFont(&FreeSansBold9pt7b);
+    display.setTextColor(GxEPD_BLACK);
+
+    // Draw Forecast Min/Max
+    if (minF_idx != -1) {
+        int px = originX + (minF_idx * graphW / 24) + (graphW / 48);
+        int py = originY - ((minF - minAxis) * graphH / (maxAxis - minAxis));
+        display.fillCircle(px, py, 3, GxEPD_RED);
+        display.setCursor(px - 10, py + 15);
+        display.print(String(minF, 1));
+    }
+    if (maxF_idx != -1 && maxF_idx != minF_idx) {
+        int px = originX + (maxF_idx * graphW / 24) + (graphW / 48);
+        int py = originY - ((maxF - minAxis) * graphH / (maxAxis - minAxis));
+        display.fillCircle(px, py, 3, GxEPD_RED);
+        display.setCursor(px - 10, py - 8);
+        display.print(String(maxF, 1));
+    }
+
+    // Draw History Min/Max
+    if (minH_idx != -1) {
+        int px = originX + (minH_idx * graphW / 24) + (graphW / 48);
+        int py = originY - ((minH - minAxis) * graphH / (maxAxis - minAxis));
+        display.fillCircle(px, py, 3, GxEPD_GREEN);
+        display.setCursor(px - 10, py + 15);
+        display.print(String(minH, 1));
+    }
+    if (maxH_idx != -1 && maxH_idx != minH_idx) {
+        int px = originX + (maxH_idx * graphW / 24) + (graphW / 48);
+        int py = originY - ((maxH - minAxis) * graphH / (maxAxis - minAxis));
+        display.fillCircle(px, py, 3, GxEPD_GREEN);
+        display.setCursor(px - 10, py - 8);
+        display.print(String(maxH, 1));
     }
 }
 
