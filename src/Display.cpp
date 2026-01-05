@@ -169,9 +169,9 @@ void Display::drawGraphs(int x, int y, int w, int h, const HourlyData hourly[]) 
         maxVal = 30;
     }
 
-    // 2. Auto-range with padding (+- 10)
-    float targetMin = minVal - 10.0;
-    float targetMax = maxVal + 10.0;
+    // 2. Auto-range with padding (+- 5)
+    float targetMin = minVal - 5.0;
+    float targetMax = maxVal + 5.0;
     float range = targetMax - targetMin;
     
     // 3. Calculate Tick Step (aim for 7-10 ticks)
@@ -285,7 +285,7 @@ void Display::drawWeather(const WeatherData& current, const DailyForecast daily[
     display.fillScreen(GxEPD_WHITE);
     
     if (current.valid) {
-      int headerH = 25;
+      int headerH = 30;
       int topH = 140 + headerH;
       int w = 800;
       int colW = w / 5;
@@ -316,10 +316,10 @@ void Display::drawWeather(const WeatherData& current, const DailyForecast daily[
       // Col 1: Condition (Icon + Text)
       // Icon
       int iconX = colW * 0 + 20;
-      int iconY = 20 + headerH;
+      int iconY = headerH-20;
       weatherIcons.drawWeatherIcon(current.iconName, iconX, iconY);
       // Text
-      RenderSecondaryValue(colW * 0 + 10, 130 + headerH, String(current.conditionText), 12);
+      RenderSecondaryValue(colW * 0 + 10, 110 + headerH, String(current.conditionText), 12);
 
       // Col 2: Temp
       RenderTitleText(colW * 1 + 10, yCenter - 60, "Temperature");

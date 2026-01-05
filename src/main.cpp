@@ -4,7 +4,6 @@
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <time.h>
-#include <Preferences.h>
 #include "secrets.h"
 #include "Display.h"
 
@@ -15,16 +14,7 @@ const char* ntpServer = "pool.ntp.org";
 // Melbourne Timezone
 const char* time_zone = "AEST-10AEDT,M10.1.0,M4.1.0/3";
 
-// RTC Storage definitions
-struct DailyForecastRTC {
-  char dayName[16];
-  char iconName[32];
-  char conditionText[64];
-  float tempHigh;
-  float tempLow;
-};
-
-Preferences preferences;
+// Preferences preferences; // Removed as per request
 
 WeatherData currentWeather;
 DailyForecast dailyForecasts[3];
@@ -32,67 +22,8 @@ HourlyData hourlyData[24];
 
 Display displayHandler;
 
-void saveForecastToFlash(int dayOfYear) {
-  preferences.begin("weather", false); // false = read/write
-  
-  // Convert DailyForecast (String) to DailyForecastRTC (char arrays) for storage
-  DailyForecastRTC tempDaily[3];
-  for(int i=0; i<3; i++) {
-    strlcpy(tempDaily[i].dayName, dailyForecasts[i].dayName.c_str(), sizeof(tempDaily[i].dayName));
-    strlcpy(tempDaily[i].iconName, dailyForecasts[i].iconName.c_str(), sizeof(tempDaily[i].iconName));
-    strlcpy(tempDaily[i].conditionText, dailyForecasts[i].conditionText.c_str(), sizeof(tempDaily[i].conditionText));
-    tempDaily[i].tempHigh = dailyForecasts[i].tempHigh;
-    tempDaily[i].tempLow = dailyForecasts[i].tempLow;
-  }
-  
-  preferences.putBytes("daily", tempDaily, sizeof(tempDaily));
-  preferences.putBytes("hourly", hourlyData, sizeof(hourlyData));
-  preferences.putInt("day", dayOfYear);
-  
-  preferences.end();
-  Serial.printf("Forecast data saved to Flash for day %d\n", dayOfYear);
-}
+// saveForecastToFlash and loadForecastFromFlash removed
 
-bool loadForecastFromFlash(int currentDayOfYear) {
-  preferences.begin("weather", true); // true = read-only
-  
-  int savedDay = preferences.getInt("day", -1);
-  
-  if (savedDay == -1) {
-      Serial.println("No saved forecast found.");
-      preferences.end();
-      return false;
-  }
-  
-  if (savedDay != currentDayOfYear) {
-      Serial.printf("Saved forecast is for day %d, but current day is %d. Expired.\n", savedDay, currentDayOfYear);
-      preferences.end();
-      return false;
-  }
-
-  DailyForecastRTC tempDaily[3];
-  size_t dailyLen = preferences.getBytes("daily", tempDaily, sizeof(tempDaily));
-  size_t hourlyLen = preferences.getBytes("hourly", hourlyData, sizeof(hourlyData));
-  
-  preferences.end();
-
-  if (dailyLen != sizeof(tempDaily) || hourlyLen != sizeof(hourlyData)) {
-      Serial.println("Saved data size mismatch.");
-      return false;
-  }
-
-  // Convert back to String objects
-  for(int i=0; i<3; i++) {
-    dailyForecasts[i].dayName = String(tempDaily[i].dayName);
-    dailyForecasts[i].iconName = String(tempDaily[i].iconName);
-    dailyForecasts[i].conditionText = String(tempDaily[i].conditionText);
-    dailyForecasts[i].tempHigh = tempDaily[i].tempHigh;
-    dailyForecasts[i].tempLow = tempDaily[i].tempLow;
-  }
-  
-  Serial.println("Forecast data loaded from Flash");
-  return true;
-}
 
 void getMockForecastData() {
   // Mock 3-day forecast
@@ -309,13 +240,13 @@ void getDailyForecastData() {
   }
 }
 
-void getHourlyForecastData() {
+void getHourlyForecastData(int hoursCount) {
   if (WiFi.status() == WL_CONNECTED) {
-    // Request 48 hours to ensure we cover the rest of the current day
+    // Request hoursCount hours to ensure we cover the rest of the current day
     String url = "https://weather.googleapis.com/v1/forecast/hours:lookup?key=" + String(GOOGLE_API_KEY) 
       + "&location.latitude=" + String(LATITUDE) 
       + "&location.longitude=" + String(LONGITUDE) 
-      + "&hours=48"
+      + "&hours=" + String(hoursCount)
       + "&unitsSystem=METRIC";
     
     Serial.println("Requesting URL: " + url);
@@ -455,6 +386,94 @@ void getHourlyForecastData() {
   }
 }
 
+void getHistoryData(int hoursCount) {
+  if (WiFi.status() == WL_CONNECTED) {
+    // Request hoursCount hours of history to cover the current day so far
+    String url = "https://weather.googleapis.com/v1/history/hours:lookup?key=" + String(GOOGLE_API_KEY) 
+      + "&location.latitude=" + String(LATITUDE) 
+      + "&location.longitude=" + String(LONGITUDE) 
+      + "&hours=" + String(hoursCount)
+      + "&unitsSystem=METRIC";
+    
+    Serial.println("Requesting History URL: " + url);
+
+    WiFiClientSecure client;
+    client.setInsecure();
+    HTTPClient http;
+    http.begin(client, url);
+    int httpResponseCode = http.GET();
+    
+    if (httpResponseCode > 0) {
+      String payload = http.getString();
+      Serial.println("HTTP Response code: " + String(httpResponseCode));
+      
+      JsonDocument filter;
+      filter["historyHours"][0]["interval"]["startTime"] = true;
+      filter["historyHours"][0]["temperature"]["degrees"] = true;
+
+      JsonDocument doc;
+      DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
+
+      if (error) {
+        Serial.print("deserializeJson() failed: ");
+        Serial.println(error.c_str());
+      } else {
+        // Get current day to filter history
+        struct tm timeinfo;
+        if(!getLocalTime(&timeinfo, 1000)){
+            Serial.println("Failed to obtain time for history filtering");
+        }
+        int currentDay = timeinfo.tm_mday;
+
+        JsonArray history = doc["historyHours"];
+        for(int i=0; i<history.size(); i++) {
+            JsonObject h_data = history[i];
+            String timeStr = h_data["interval"]["startTime"].as<String>();
+            
+            // Parse ISO string "2026-01-03T17:00:00Z"
+            int y, M, d, h, m, s;
+            sscanf(timeStr.c_str(), "%d-%d-%dT%d:%d:%dZ", &y, &M, &d, &h, &m, &s);
+            
+            struct tm tm_utc = {0};
+            tm_utc.tm_year = y - 1900;
+            tm_utc.tm_mon = M - 1;
+            tm_utc.tm_mday = d;
+            tm_utc.tm_hour = h;
+            tm_utc.tm_min = m;
+            tm_utc.tm_sec = s;
+            tm_utc.tm_isdst = 0;
+            
+            // Convert UTC to local time
+            char oldTZ[64];
+            strcpy(oldTZ, getenv("TZ"));
+            setenv("TZ", "UTC0", 1);
+            tzset();
+            time_t t_utc = mktime(&tm_utc);
+            setenv("TZ", oldTZ, 1);
+            tzset();
+            
+            struct tm *tm_local = localtime(&t_utc);
+            
+            // Check if this history point is for "today"
+            if (tm_local->tm_mday == currentDay) {
+                int hour = tm_local->tm_hour;
+                if (hour >= 0 && hour < 24) {
+                    hourlyData[hour].actualTemp = h_data["temperature"]["degrees"];
+                }
+            }
+        }
+        Serial.println("History data updated.");
+      }
+    } else {
+      Serial.print("Error code: ");
+      Serial.println(httpResponseCode);
+    }
+    http.end();
+  } else {
+    Serial.println("WiFi Disconnected");
+  }
+}
+
 void getWeatherCurrentData(){
     if (WiFi.status() == WL_CONNECTED) {
     String url = "https://weather.googleapis.com/v1/currentConditions:lookup?key=" + String(GOOGLE_API_KEY) 
@@ -553,17 +572,24 @@ void setup() {
   if (timeSuccess) {
     Serial.printf("Current Day of Year: %d\n", timeinfo.tm_yday);
     
-    // Check if we need to update forecast (New day or no data)
-    bool loaded = loadForecastFromFlash(timeinfo.tm_yday);
+    // Always fetch new data
+    Serial.println("Fetching forecast and history data...");
+    getDailyForecastData();
     
-    if (!loaded) {
-      Serial.println("Fetching new forecast data (New Day or First Boot)...");
-      getDailyForecastData();
-      getHourlyForecastData();
-      saveForecastToFlash(timeinfo.tm_yday);
-    } else {
-      Serial.println("Using stored forecast data from Flash.");
-    }
+    int currentHour = timeinfo.tm_hour;
+    // Forecast: From now until end of day (approx). 
+    // If 10am, we need 14 hours (10,11...23). 24 - 10 = 14.
+    // Add 2 for safety/overlap.
+    int forecastHours = 24 - currentHour + 2;
+    if (forecastHours > 48) forecastHours = 48; 
+    getHourlyForecastData(forecastHours);
+    
+    // History: From midnight until now.
+    // If 10am, we need 11 hours (00...10). 10 + 1 = 11.
+    int historyHours = currentHour + 1;
+    if (historyHours > 24) historyHours = 24;
+    getHistoryData(historyHours);
+    
     // display forcast data hourly to serial
     Serial.println("--- Forecast Data: 3 day ---");
     for(int i=0; i<3; i++) {
@@ -574,30 +600,9 @@ void setup() {
         Serial.printf("Hour %02d: Temp: %.1f, Rain Prob: %d%%, Actual Temp: %.1f\n", hourlyData[i].hour, hourlyData[i].temp, hourlyData[i].rainProb, hourlyData[i].actualTemp);
     }
 
-    // Update actual temperature for current hour
-    int currentHour = timeinfo.tm_hour;
-    for(int i=0; i<24; i++) {
-        if(hourlyData[i].hour == currentHour) {
-            if (currentWeather.valid) {
-                hourlyData[i].actualTemp = currentWeather.temp;
-                // Save updated hourly data to Flash
-                preferences.begin("weather", false);
-                preferences.putBytes("hourly", hourlyData, sizeof(hourlyData));
-                preferences.end();
-                
-                Serial.printf("Updated actual temp for hour %d: %.1f\n", currentHour, currentWeather.temp);
-            } else {
-                Serial.printf("Current weather invalid, skipping actual temp update for hour %d\n", currentHour);
-            }
-            break;
-        }
-    }
   } else {
     Serial.println("Failed to obtain time, forcing forecast update...");
     sleepUntilNextHour();
-    //getDailyForecastData();
-    //getHourlyForecastData();
-    // Can't save to Flash reliably without valid time/day
   }
   delay(1000);
   displayHandler.init();
