@@ -209,6 +209,7 @@ void getHourlyForecastData(int hoursCount) {
             hourlyData[i].temp = -100.0; // Sentinel for no data
             hourlyData[i].rainProb = -1; // Sentinel for no data
             hourlyData[i].actualTemp = -100.0;
+            hourlyData[i].actualRain = -1.0;
         }
 
         // Get current day to filter forecast
@@ -340,6 +341,7 @@ void getHistoryData(int hoursCount) {
       JsonDocument filter;
       filter["historyHours"][0]["interval"]["startTime"] = true;
       filter["historyHours"][0]["temperature"]["degrees"] = true;
+      filter["historyHours"][0]["precipitation"]["rainfallMM"] = true;
 
       JsonDocument doc;
       DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
@@ -389,6 +391,13 @@ void getHistoryData(int hoursCount) {
                 int hour = tm_local->tm_hour;
                 if (hour >= 0 && hour < 24) {
                     hourlyData[hour].actualTemp = h_data["temperature"]["degrees"];
+                    if (h_data["precipitation"].containsKey("rainfallMM")) {
+                        hourlyData[hour].actualRain = h_data["precipitation"]["rainfallMM"];
+                    } else {
+                        hourlyData[hour].actualRain = 0.0; // Assume 0 if missing? Or keep -1? Let's assume 0 if object exists but field missing, or just 0.
+                        // Actually, if precipitation object is missing, it might mean 0 rain.
+                        // But we filtered for it.
+                    }
                 }
             }
         }

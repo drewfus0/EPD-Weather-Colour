@@ -232,6 +232,21 @@ void Display::drawGraphs(int x, int y, int w, int h, const HourlyData hourly[]) 
             display.fillRect(px, py, barW, barH, GxEPD_BLUE);
         }
     }
+
+    // Plot Actual Rain (Bars) - Orange
+    for (int i = 0; i < 24; i++) {
+        if (hourly[i].actualRain >= 0) {
+            // Scale: 1mm = 10% of graph height? Or 1mm = 1 unit on 0-100 scale?
+            // Let's use 1mm = 1 unit on 0-100 scale for now.
+            int barH = (hourly[i].actualRain * graphH) / 100;
+            if (barH > graphH) barH = graphH; // Clamp
+            
+            int barW = (graphW / 24) - 2;
+            int px = originX + (i * graphW / 24) + 1;
+            int py = originY - barH;
+            display.fillRect(px, py, barW, barH, GxEPD_ORANGE);
+        }
+    }
     
     // Plot Temperature (Line) - Red
     int prevX = -1, prevY = -1;

@@ -43,6 +43,7 @@ struct HourlyData {
   float temp;
   int rainProb;
   float actualTemp = -100.0; // -100 indicates no data
+  float actualRain = -1.0;   // -1 indicates no data
 };
 
 class Display {
