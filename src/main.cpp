@@ -49,7 +49,7 @@ struct DailyForecastRTC {
 };
 
 WeatherData currentWeather;
-DailyForecast dailyForecasts[3];
+DailyForecast dailyForecasts[5];
 HourlyData hourlyData[24];
 
 Display displayHandler;
@@ -87,8 +87,8 @@ void saveWeatherData(int typeMask, int currentHour, int currentDay) {
     }
 
     if (typeMask & DATA_DAILY) {
-        DailyForecastRTC daily[3];
-        for(int i=0; i<3; i++) {
+        DailyForecastRTC daily[5];
+        for(int i=0; i<5; i++) {
             strlcpy(daily[i].dayName, dailyForecasts[i].dayName.c_str(), sizeof(daily[i].dayName));
             strlcpy(daily[i].iconName, dailyForecasts[i].iconName.c_str(), sizeof(daily[i].iconName));
             strlcpy(daily[i].conditionText, dailyForecasts[i].conditionText.c_str(), sizeof(daily[i].conditionText));
@@ -146,9 +146,9 @@ int loadWeatherData(int currentHour, int currentDay) {
 
     // Load Daily
     if (status & DATA_DAILY) {
-        DailyForecastRTC daily[3];
+        DailyForecastRTC daily[5];
         if (preferences.getBytes("daily", daily, sizeof(daily)) == sizeof(daily)) {
-            for(int i=0; i<3; i++) {
+            for(int i=0; i<5; i++) {
                 dailyForecasts[i].dayName = String(daily[i].dayName);
                 dailyForecasts[i].iconName = String(daily[i].iconName);
                 dailyForecasts[i].conditionText = String(daily[i].conditionText);

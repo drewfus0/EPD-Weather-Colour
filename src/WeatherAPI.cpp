@@ -113,7 +113,7 @@ void getDailyForecastData() {
     String url = "https://weather.googleapis.com/v1/forecast/days:lookup?key=" + String(GOOGLE_API_KEY) 
       + "&location.latitude=" + String(LATITUDE) 
       + "&location.longitude=" + String(LONGITUDE) 
-      + "&days=3"
+      + "&days=5"
       + "&unitsSystem=METRIC";
     
     Serial.println("Requesting URL: " + url);
@@ -143,7 +143,7 @@ void getDailyForecastData() {
         Serial.println(error.c_str());
       } else {
         JsonArray forecasts = doc["forecastDays"];
-        for(int i=0; i<3 && i<forecasts.size(); i++) {
+        for(int i=0; i<5 && i<forecasts.size(); i++) {
             JsonObject f = forecasts[i];
             int y = f["displayDate"]["year"];
             int m = f["displayDate"]["month"];

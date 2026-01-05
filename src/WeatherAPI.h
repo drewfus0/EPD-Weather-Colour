@@ -7,7 +7,7 @@
 
 // Declare external global variables that these functions modify
 extern WeatherData currentWeather;
-extern DailyForecast dailyForecasts[3];
+extern DailyForecast dailyForecasts[5];
 extern HourlyData hourlyData[24];
 
 // Function declarations

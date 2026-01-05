@@ -114,25 +114,22 @@ void Display::drawWindDirection(int cx, int cy, int r, float WindDirection)
 }
 
 void Display::drawDailyForecast(int x, int y, int w, int h, const DailyForecast daily[]) {
-    int rowH = h / 3;
-    for (int i = 0; i < 3; i++) {
-        int rowY = y + i * rowH;
+    int colW = w / 5;
+    for (int i = 0; i < 5; i++) {
+        int colX = x + i * colW;
         
         // Separator line
-        if (i > 0) display.drawLine(x, rowY, x + w, rowY, GxEPD_BLACK);
+        if (i > 0) display.drawLine(colX, y, colX, y + h, GxEPD_BLACK);
         
         // Day Name
-        RenderSecondaryValue(x + 10, rowY + 25, daily[i].dayName, 15);
+        RenderSecondaryValue(colX + 10, y + 25, daily[i].dayName, 12);
         
         // Icon
-        weatherIcons.drawWeatherIcon(daily[i].iconName, x + 10, rowY + 35, 64);
+        weatherIcons.drawWeatherIcon(daily[i].iconName, colX + (colW-64)/2, y + 35, 64);
         
         // High / Low
-        RenderPrimaryValue(x + 120, rowY + 55, String(daily[i].tempHigh, 1), 15);
-        RenderSecondaryValue(x + 220, rowY + 55, String(daily[i].tempLow, 1), 20);
-
-        // Description
-        RenderSecondaryValue(x + 120, rowY + 85, daily[i].conditionText, 20);
+        String tempStr = String(daily[i].tempHigh, 0) + " / " + String(daily[i].tempLow, 0);
+        RenderSecondaryValue(colX + (colW/2) - 30, y + 110, tempStr, 15);
     }
 }
 
@@ -362,10 +359,11 @@ void Display::drawWeather(const WeatherData& current, const DailyForecast daily[
     
     if (current.valid) {
       int headerH = 30;
-      int topH = 140 + headerH;
+      int bottomH = 130;
+      int mainH = 480 - headerH - bottomH; // 320
+      int mainY = headerH;
+      int bottomY = 480 - bottomH;
       int w = 800;
-      int colW = w / 5;
-      int yCenter = headerH + (140 / 2);
 
       // Draw Header (Date/Time)
       struct tm timeinfo;
@@ -384,57 +382,44 @@ void Display::drawWeather(const WeatherData& current, const DailyForecast daily[
       // Header separator
       display.drawLine(0, headerH, w, headerH, GxEPD_BLACK);
 
-      // Draw separator line
-      display.drawLine(0, topH, w, topH, GxEPD_YELLOW);
-      display.drawLine(0, topH-1, w, topH-1, GxEPD_YELLOW);
-      display.drawLine(0, topH+1, w, topH+1, GxEPD_YELLOW);
-
-      // Col 1: Condition (Icon + Text)
+      // --- Left Column: Current Weather (1/3 width = ~266px) ---
+      int leftW = 266;
+      int centerX = leftW / 2;
+      
       // Icon
-      int iconX = colW * 0 + 20;
-      int iconY = headerH-20;
-      weatherIcons.drawWeatherIcon(current.iconName, iconX, iconY);
-      // Text
-      RenderSecondaryValue(colW * 0 + 10, 110 + headerH, String(current.conditionText), 12);
-
-      // Col 2: Temp
-      RenderTitleText(colW * 1 + 10, yCenter - 60, "Temperature");
-      RenderPrimaryValue(colW * 1 + 10, yCenter - 20, String(current.temp) + " c");
-      RenderTitleText(colW * 1 + 10, yCenter + 20, "Feels Like:");
-      RenderSecondaryValue(colW * 1 + 10, yCenter + 50, String(current.feelsLike) + " c");
-
-      // Col 3: Wind
-      //RenderText(colW * 2 + 10, yCenter - 40, &FreeMonoBold12pt7b, GxEPD_BLACK, "Wind Info:");
-      RenderTitleText(colW * 2 + 10, yCenter - 60, "Wind :");
-      RenderPrimaryValue(colW * 2 + 10, yCenter - 20, String(current.windSpeed));
-      RenderTitleText(colW * 2 + 10, yCenter + 20, "Gust:");
-      RenderSecondaryValue(colW * 2 + 10, yCenter + 50, String(current.windGust));
+      weatherIcons.drawWeatherIcon(current.iconName, centerX - 32, mainY + 10);
       
-      // Arrow
-      //Convert the Arrow into an Triangle inside a circle radius 30
-      drawWindDirection(colW * 2 + 120, yCenter + 30, 30, current.windDirection);
+      // Condition Text
+      int textY = mainY + 90;
+      RenderSecondaryValue(10, textY, current.conditionText, 20);
+      
+      // Temp
+      RenderPrimaryValue(10, textY + 40, String(current.temp, 1) + " C");
+      RenderSecondaryValue(10, textY + 70, "Feels: " + String(current.feelsLike, 1), 20);
+      
+      // Wind
+      RenderSecondaryValue(10, textY + 100, "Wind: " + String(current.windSpeed, 1) + " km/h", 20);
+      drawWindDirection(220, textY + 95, 20, current.windDirection);
+      
+      // Humidity / Rain
+      RenderSecondaryValue(10, textY + 130, "Hum: " + String(current.humidity) + "%", 20);
+      RenderSecondaryValue(10, textY + 160, "Rain: " + String(current.precipitationProbability) + "%", 20);
+      
+      // UV / Pressure
+      RenderSecondaryValue(10, textY + 190, "UV: " + String(current.uvIndex), 20);
+      RenderSecondaryValue(10, textY + 220, "Press: " + String(current.pressure), 20);
 
-      // Col 4: Humidity & Rain
-      RenderTitleText(colW * 3 + 10, yCenter - 60, "Humidity");
-      RenderSecondaryValue(colW * 3 + 10, yCenter - 20, String(current.humidity) + "%");
-      RenderTitleText(colW * 3 + 10, yCenter + 20, "Rain Prob:");
-      RenderSecondaryValue(colW * 3 + 10, yCenter + 50, String(current.precipitationProbability) + "%");
+      // Vertical Separator
+      display.drawLine(leftW, mainY, leftW, bottomY, GxEPD_BLACK);
 
-      // Col 5: UV - pressure
-      RenderTitleText(colW * 4 + 10, yCenter - 60, "UV Index:");
-      RenderSecondaryValue(colW * 4 + 10, yCenter - 20, String(current.uvIndex));
-      RenderTitleText(colW * 4 + 10, yCenter + 20, "Pressure:");
-      RenderSecondaryValue(colW * 4 + 10, yCenter + 50, String(current.pressure) + " hPa");
+      // --- Right Column: Graph (2/3 width = ~534px) ---
+      drawGraphs(leftW, mainY, w - leftW, mainH, hourly);
       
-      // bottom 2/3rds forcast / actuals
-      int bottomY = 160 + headerH;
-      int bottomH = 320 - headerH;
+      // Horizontal Separator
+      display.drawLine(0, bottomY, w, bottomY, GxEPD_BLACK);
       
-      // Left 2/5ths = 320px
-      drawDailyForecast(0, bottomY, 320, bottomH, daily);
-      
-      // Right 3/5ths = 480px
-      drawGraphs(320, bottomY, 480, bottomH, hourly);
+      // --- Bottom Row: Daily Forecast ---
+      drawDailyForecast(0, bottomY, w, bottomH, daily);
 
     } else {
       display.setFont(&FreeMonoBold24pt7b);
