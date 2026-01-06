@@ -388,9 +388,9 @@ bool getHourlyForecastData(int hoursCount) {
                     hourlyData[hour].temp = f["temperature"]["degrees"];
                     hourlyData[hour].rainProb = f["precipitation"]["probability"]["percent"];
                     
-                    if (f["pressure"].containsKey("meanSeaLevelMillibars")) {
+                    if (!f["pressure"]["meanSeaLevelMillibars"].isNull()) {
                          hourlyData[hour].pressure = f["pressure"]["meanSeaLevelMillibars"];
-                    } else if (f["airPressure"].containsKey("meanSeaLevelMillibars")) {
+                    } else if (!f["airPressure"]["meanSeaLevelMillibars"].isNull()) {
                          hourlyData[hour].pressure = f["airPressure"]["meanSeaLevelMillibars"];
                     }
                     // actualTemp is left as -100.0
@@ -495,15 +495,15 @@ bool getHistoryData(int hoursCount) {
                 int hour = tm_local->tm_hour;
                 if (hour >= 0 && hour < 24) {
                     hourlyData[hour].actualTemp = h_data["temperature"]["degrees"];
-                    if (h_data["precipitation"].containsKey("rainfallMM")) {
+                    if (!h_data["precipitation"]["rainfallMM"].isNull()) {
                         hourlyData[hour].actualRain = h_data["precipitation"]["rainfallMM"];
                     } else {
                         hourlyData[hour].actualRain = 0.0;
                     }
 
-                    if (h_data["pressure"].containsKey("meanSeaLevelMillibars")) {
+                    if (!h_data["pressure"]["meanSeaLevelMillibars"].isNull()) {
                          hourlyData[hour].actualPressure = h_data["pressure"]["meanSeaLevelMillibars"];
-                    } else if (h_data["airPressure"].containsKey("meanSeaLevelMillibars")) {
+                    } else if (!h_data["airPressure"]["meanSeaLevelMillibars"].isNull()) {
                          hourlyData[hour].actualPressure = h_data["airPressure"]["meanSeaLevelMillibars"];
                     }
                 }
