@@ -401,12 +401,10 @@ void setup() {
         Serial.printf("Forecast Day %d: %s, High: %.1f, Low: %.1f, Icon: %s\n", i, dailyForecasts[i].dayName.c_str(), dailyForecasts[i].tempHigh, dailyForecasts[i].tempLow, dailyForecasts[i].iconName.c_str());
     }
     Serial.println("--- Hourly Data: 24 hour ---");
-    Serial.printf("%8s|%8s|%8s|%8s|%8s|%8s|%8s|%8s|%8s\n", "Hour", "Temp", "Actual", "Indoor", "Rain", "Prob", "Press", "IndPre", "Wind");
-    Serial.println("--------|--------|--------|--------|--------|--------|--------|--------|--------");
+    Serial.printf("%4s|%8s|%8s|%8s|%8s|%5s|%8s|%8s|%8s\n", "Hour", "Temp", "Actual", "Indoor", "Rain", "Prob", "Press", "ActPress", "IndPress");
+    Serial.println("----|--------|--------|--------|--------|-----|--------|--------|--------");
     for(int i=0; i<24; i++) {
-      Serial.printf("%8d|%8.1f|%8.1f|%8.1f|%8.1f|%7d%%|%8.1f|%8.1f|%8.1f\n", 
-        if (hourlyData[i].indoorPressure == -1.0) hourlyData[i].indoorPressure = -100.0; // Alignment for print if needed or keep uniform sentinel
-
+      Serial.printf("%4d|%8.1f|%8.1f|%8.1f|%8.1f|%4d%%|%8.1f|%8.1f|%8.1f\n", 
         hourlyData[i].hour, 
         hourlyData[i].temp, 
         hourlyData[i].actualTemp, 
@@ -414,8 +412,8 @@ void setup() {
         hourlyData[i].actualRain, 
         hourlyData[i].rainProb,
         hourlyData[i].pressure,
+        hourlyData[i].actualPressure,
         hourlyData[i].indoorPressure);
-        //hourlyData[i].windSpeed);
     }
 
   } else {
