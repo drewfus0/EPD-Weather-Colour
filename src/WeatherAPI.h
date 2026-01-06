@@ -16,9 +16,9 @@ String getIconNameFromUri(String uri);
 String getAPIData(String url);
 void updateCurrentWeather(JsonObject hourly);
 String getDayName(int year, int month, int day);
-void getDailyForecastData();
-void getHourlyForecastData(int hoursCount);
-void getHistoryData(int hoursCount);
-void getWeatherCurrentData();
+bool getDailyForecastData();
+bool getHourlyForecastData(int hoursCount);
+bool getHistoryData(int hoursCount);
+bool getWeatherCurrentData();
 
 #endif

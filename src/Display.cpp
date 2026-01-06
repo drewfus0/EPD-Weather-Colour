@@ -125,7 +125,7 @@ void Display::drawDailyForecast(int x, int y, int w, int h, const DailyForecast 
         RenderSecondaryValue(colX + 10, y + 25, daily[i].dayName, 12);
         
         // Icon
-        weatherIcons.drawWeatherIcon(daily[i].iconName, colX + (colW-64)/2, y + 35, 64);
+        weatherIcons.drawWeatherIcon(daily[i].iconName, colX + (colW-60)/2, y + 35, 60);
         
         // High / Low
         String tempStr = String(daily[i].tempHigh, 0) + " / " + String(daily[i].tempLow, 0);
@@ -133,7 +133,26 @@ void Display::drawDailyForecast(int x, int y, int w, int h, const DailyForecast 
     }
 }
 
-void Display::drawGraphs(int x, int y, int w, int h, const HourlyData hourly[]) {
+void Display::drawDottedLine(int x0, int y0, int x1, int y1, uint16_t color) {
+  // Simple dotted line implementation using Bresenham's algorithm logic
+  int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+  int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+  int err = dx + dy, e2;
+  int count = 0;
+
+  for (;;) {
+    if (count % 4 < 2) { // 2 pixels on, 2 pixels off
+        display.drawPixel(x0, y0, color);
+    }
+    if (x0 == x1 && y0 == y1) break;
+    e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x0 += sx; }
+    if (e2 <= dx) { err += dx; y0 += sy; }
+    count++;
+  }
+}
+
+void Display::drawGraphs(int x, int y, int w, int h, const HourlyData hourly[], const DailyForecast& today) {
     // Margins
     int marginLeft = 40;
     int marginBottom = 30;
@@ -157,6 +176,11 @@ void Display::drawGraphs(int x, int y, int w, int h, const HourlyData hourly[]) 
         if (hourly[i].actualTemp > -99.0) {
             if (hourly[i].actualTemp < minVal) minVal = hourly[i].actualTemp;
             if (hourly[i].actualTemp > maxVal) maxVal = hourly[i].actualTemp;
+            foundData = true;
+        }
+        if (hourly[i].indoorTemp > -99.0) {
+            if (hourly[i].indoorTemp < minVal) minVal = hourly[i].indoorTemp;
+            if (hourly[i].indoorTemp > maxVal) maxVal = hourly[i].indoorTemp;
             foundData = true;
         }
     }
@@ -234,7 +258,7 @@ void Display::drawGraphs(int x, int y, int w, int h, const HourlyData hourly[]) 
         }
     }
 
-    // Plot Actual Rain (Bars) - Orange
+    // Plot Actual Rain (Bars)
     for (int i = 0; i < 24; i++) {
         if (hourly[i].actualRain >= 0) {
             // Scale: 1mm = 10% of graph height? Or 1mm = 1 unit on 0-100 scale?
@@ -245,7 +269,8 @@ void Display::drawGraphs(int x, int y, int w, int h, const HourlyData hourly[]) 
             int barW = (graphW / 24) - 2;
             int px = originX + (i * graphW / 24) + 1;
             int py = originY - barH;
-            display.fillRect(px, py, barW, barH, GxEPD_ORANGE);
+            display.fillRect(px, py, barW, barH, GxEPD_RED);
+            display.fillRect(px-1, py-1, barW-2, barH-2, GxEPD_RED);
         }
     }
     
@@ -285,6 +310,112 @@ void Display::drawGraphs(int x, int y, int w, int h, const HourlyData hourly[]) 
         } else {
             prevX = -1;
         }
+    }
+
+    // Plot Indoor Temperature (Line) - Black
+    prevX = -1; prevY = -1;
+    for (int i = 0; i < 24; i++) {
+        if (hourly[i].indoorTemp > -99.0) {
+            int px = originX + (i * graphW / 24) + (graphW / 48);
+            int py = originY - ((hourly[i].indoorTemp - minAxis) * graphH / (maxAxis - minAxis));
+            
+            if (prevX != -1) {
+                display.drawLine(prevX, prevY, px, py, GxEPD_BLACK);
+            }
+            prevX = px;
+            prevY = py;
+        } else {
+            prevX = -1;
+        }
+    }
+    
+    // --- Pressure Graph (Dotted Lines) ---
+    // Calculate separate min/max for pressure
+    float minP = 2000.0, maxP = 0.0;
+    bool foundP = false;
+    for (int i = 0; i < 24; i++) {
+        if (hourly[i].pressure > 0) {
+            if (hourly[i].pressure < minP) minP = hourly[i].pressure;
+            if (hourly[i].pressure > maxP) maxP = hourly[i].pressure;
+            foundP = true;
+        }
+        if (hourly[i].actualPressure > 0) {
+            if (hourly[i].actualPressure < minP) minP = hourly[i].actualPressure;
+            if (hourly[i].actualPressure > maxP) maxP = hourly[i].actualPressure;
+            foundP = true;
+        }
+        if (hourly[i].indoorPressure > 0) {
+            if (hourly[i].indoorPressure < minP) minP = hourly[i].indoorPressure;
+            if (hourly[i].indoorPressure > maxP) maxP = hourly[i].indoorPressure;
+            foundP = true;
+        }
+    }
+    
+    if (foundP) {
+       // Add padding
+       float pRange = maxP - minP;
+       if (pRange < 1.0) pRange = 1.0; 
+       float minAxisP = minP - pRange * 0.1;
+       float maxAxisP = maxP + pRange * 0.1;
+
+       // Pressure Axis Ticks (Green, Inside Left)
+       int pStep = 1;
+       if (pRange > 20.0) pStep = 10;
+       else if (pRange > 10.0) pStep = 5;
+       else if (pRange > 5.0) pStep = 2;
+       
+       display.setFont(&FreeMonoBold9pt7b);
+       display.setTextColor(GxEPD_GREEN);
+       
+       int startP = (int)ceil(minAxisP / pStep) * pStep;
+       for (int p = startP; p <= (int)maxAxisP; p += pStep) {
+           int py = originY - ((p - minAxisP) * graphH / (maxAxisP - minAxisP));
+           // Ensure we don't draw outside graph vertical bounds
+           if (py >= (originY - graphH) && py <= originY) {
+               display.drawLine(originX, py, originX + 5, py, GxEPD_GREEN);
+               display.setCursor(originX + 8, py + 4);
+               display.print(String(p));
+           }
+       }
+
+       // Forecast Pressure (Red Dotted)
+       prevX = -1; prevY = -1;
+       for (int i = 0; i < 24; i++) {
+           if (hourly[i].pressure > 0) {
+               int px = originX + (i * graphW / 24) + (graphW / 48);
+               int py = originY - ((hourly[i].pressure - minAxisP) * graphH / (maxAxisP - minAxisP));
+               if (prevX != -1) {
+                   drawDottedLine(prevX, prevY, px, py, GxEPD_RED);
+               }
+               prevX = px; prevY = py;
+           } else { prevX = -1; }
+       }
+       
+       // Actual Pressure (Green Dotted)
+       prevX = -1; prevY = -1;
+       for (int i = 0; i < 24; i++) {
+           if (hourly[i].actualPressure > 0) {
+               int px = originX + (i * graphW / 24) + (graphW / 48);
+               int py = originY - ((hourly[i].actualPressure - minAxisP) * graphH / (maxAxisP - minAxisP));
+               if (prevX != -1) {
+                   drawDottedLine(prevX, prevY, px, py, GxEPD_GREEN);
+               }
+               prevX = px; prevY = py;
+           } else { prevX = -1; }
+       }
+       
+       // Indoor Pressure (Black Dotted)
+       prevX = -1; prevY = -1;
+       for (int i = 0; i < 24; i++) {
+           if (hourly[i].indoorPressure > 0) {
+               int px = originX + (i * graphW / 24) + (graphW / 48);
+               int py = originY - ((hourly[i].indoorPressure - minAxisP) * graphH / (maxAxisP - minAxisP));
+               if (prevX != -1) {
+                   drawDottedLine(prevX, prevY, px, py, GxEPD_BLACK);
+               }
+               prevX = px; prevY = py;
+           } else { prevX = -1; }
+       }
     }
 
     // Find Min/Max for Forecast (Red)
@@ -343,6 +474,28 @@ void Display::drawGraphs(int x, int y, int w, int h, const HourlyData hourly[]) 
         display.setCursor(px - 10, py - 8);
         display.print(String(maxH, 1));
     }
+
+    // Sunrise/Sunset Lines
+    if (today.sunriseHour > 0) {
+        int sunX = originX + (int)(today.sunriseHour * graphW / 24.0);
+        for (int ly = y; ly < originY; ly += 6) {
+            display.drawLine(sunX, ly, sunX, ly + 2, GxEPD_BLACK);
+        }
+        display.setFont(&FreeMonoBold9pt7b);
+        display.setTextColor(GxEPD_BLACK);
+        display.setCursor(sunX + 3, y + 15);
+        display.print(today.sunrise);
+    }
+    if (today.sunsetHour > 0) {
+        int sunX = originX + (int)(today.sunsetHour * graphW / 24.0);
+        for (int ly = y; ly < originY; ly += 6) {
+            display.drawLine(sunX, ly, sunX, ly + 2, GxEPD_BLACK);
+        }
+        display.setFont(&FreeMonoBold9pt7b);
+        display.setTextColor(GxEPD_BLACK);
+        display.setCursor(sunX - 55, y + 15);
+        display.print(today.sunset);
+    }
 }
 
 void Display::drawWeather(const WeatherData& current, const DailyForecast daily[], const HourlyData hourly[]) {
@@ -387,7 +540,7 @@ void Display::drawWeather(const WeatherData& current, const DailyForecast daily[
       int centerX = leftW / 2;
       
       // Icon
-      weatherIcons.drawWeatherIcon(current.iconName, centerX - 32, mainY + 10);
+      weatherIcons.drawWeatherIcon(current.iconName, leftW - 100, mainY + 10, 94);
       
       // Condition Text
       int textY = mainY + 90;
@@ -399,21 +552,25 @@ void Display::drawWeather(const WeatherData& current, const DailyForecast daily[
       
       // Wind
       RenderSecondaryValue(10, textY + 100, "Wind: " + String(current.windSpeed, 1) + " km/h", 20);
-      drawWindDirection(220, textY + 95, 20, current.windDirection);
+      drawWindDirection(220, textY + 100, 30, current.windDirection);
       
-      // Humidity / Rain
-      RenderSecondaryValue(10, textY + 130, "Hum: " + String(current.humidity) + "%", 20);
-      RenderSecondaryValue(10, textY + 160, "Rain: " + String(current.precipitationProbability) + "%", 20);
+      // Humidity / Rain (Condensed)
+      RenderSecondaryValue(10, textY + 130, "H:" + String(current.humidity) + "% R:" + String(current.precipitationProbability) + "%", 20);
       
-      // UV / Pressure
-      RenderSecondaryValue(10, textY + 190, "UV: " + String(current.uvIndex), 20);
-      RenderSecondaryValue(10, textY + 220, "Press: " + String(current.pressure), 20);
+      // UV / Pressure (Condensed)
+      RenderSecondaryValue(10, textY + 160, "UV:" + String(current.uvIndex) + " P:" + String(current.pressure), 20);
+
+      // Indoor
+      if (current.indoorTemp > -99.0) {
+          RenderSecondaryValue(10, textY + 190, "In: " + String(current.indoorTemp, 1) + " C", 20);
+          RenderSecondaryValue(10, textY + 220, "In Hum: " + String(current.indoorHumidity, 0) + " %", 20);
+      }
 
       // Vertical Separator
       display.drawLine(leftW, mainY, leftW, bottomY, GxEPD_BLACK);
 
       // --- Right Column: Graph (2/3 width = ~534px) ---
-      drawGraphs(leftW, mainY, w - leftW, mainH, hourly);
+      drawGraphs(leftW, mainY, w - leftW, mainH, hourly, daily[0]);
       
       // Horizontal Separator
       display.drawLine(0, bottomY, w, bottomY, GxEPD_BLACK);

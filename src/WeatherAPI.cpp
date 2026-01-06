@@ -6,9 +6,10 @@
 
 void getMockForecastData() {
   // Mock 3-day forecast
-  dailyForecasts[0] = {"Tomorrow", "partly_cloudy", "Partly Cloudy", 22.5, 14.0};
-  dailyForecasts[1] = {"Wednesday", "rain", "Rain", 18.0, 12.5};
-  dailyForecasts[2] = {"Thursday", "sunny", "Sunny", 25.0, 15.0};
+  // struct DailyForecast { String dayName; String iconName; String conditionText; float tempHigh; float tempLow; String sunrise; String sunset; float sunriseHour; float sunsetHour; };
+  dailyForecasts[0] = DailyForecast{"Tomorrow", "partly_cloudy", "Partly Cloudy", 22.5, 14.0, "06:30", "20:15", 6.5, 20.25};
+  dailyForecasts[1] = DailyForecast{"Wednesday", "rain", "Rain", 18.0, 12.5, "06:31", "20:14", 6.52, 20.23};
+  dailyForecasts[2] = DailyForecast{"Thursday", "sunny", "Sunny", 25.0, 15.0, "06:32", "20:13", 6.53, 20.22};
 
   // Mock 24-hour data
   for (int i = 0; i < 24; i++) {
@@ -108,7 +109,7 @@ String getDayName(int year, int month, int day) {
     return days[h];
 }
 
-void getDailyForecastData() {
+bool getDailyForecastData() {
   if (WiFi.status() == WL_CONNECTED) {
     String url = "https://weather.googleapis.com/v1/forecast/days:lookup?key=" + String(GOOGLE_API_KEY) 
       + "&location.latitude=" + String(LATITUDE) 
@@ -120,8 +121,10 @@ void getDailyForecastData() {
 
     WiFiClientSecure client;
     client.setInsecure();
+    client.setTimeout(10000); // 10s timeout
     HTTPClient http;
     http.begin(client, url);
+    http.setTimeout(10000);
     int httpResponseCode = http.GET();
     
     if (httpResponseCode > 0) {
@@ -134,6 +137,8 @@ void getDailyForecastData() {
       filter["forecastDays"][0]["minTemperature"]["degrees"] = true;
       filter["forecastDays"][0]["daytimeForecast"]["weatherCondition"]["description"]["text"] = true;
       filter["forecastDays"][0]["daytimeForecast"]["weatherCondition"]["iconBaseUri"] = true;
+      filter["forecastDays"][0]["sunEvents"]["sunriseTime"] = true;
+      filter["forecastDays"][0]["sunEvents"]["sunsetTime"] = true;
 
       JsonDocument doc;
       DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
@@ -141,6 +146,8 @@ void getDailyForecastData() {
       if (error) {
         Serial.print("deserializeJson() failed: ");
         Serial.println(error.c_str());
+        http.end();
+        return false;
       } else {
         JsonArray forecasts = doc["forecastDays"];
         for(int i=0; i<5 && i<forecasts.size(); i++) {
@@ -157,8 +164,65 @@ void getDailyForecastData() {
             String uri = f["daytimeForecast"]["weatherCondition"]["iconBaseUri"].as<String>();
             dailyForecasts[i].iconName = getIconNameFromUri(uri);
             
+            // Parse Sunrise/Sunset
+            String rise = f["sunEvents"]["sunriseTime"].as<String>();
+            String set = f["sunEvents"]["sunsetTime"].as<String>();
+            
+            //Serial.printf("Day %d Raw Sunrise: %s, Sunset: %s\n", i, rise.c_str(), set.c_str());
+
+            // Helper to parse "YYYY-MM-DDTHH:MM:SSZ"
+            auto parseTime = [](String tStr, float &hourVal, String &dispStr) {
+                int Y, M, D, h, m, s;
+                if (sscanf(tStr.c_str(), "%d-%d-%dT%d:%d:%d", &Y, &M, &D, &h, &m, &s) >= 6) {
+                    // Check for 'Z' to detect UTC
+                    bool isUtc = tStr.endsWith("Z");
+                    
+                    if (isUtc) {
+                        // Very basic timezone handling using system time if configured
+                        // or just assume local if we can't do better easily.
+                        // Assuming system TZ is set, we can use mktime/localtime logic.
+                        struct tm tm = {0};
+                        tm.tm_year = Y - 1900;
+                        tm.tm_mon = M - 1;
+                        tm.tm_mday = D;
+                        tm.tm_hour = h;
+                        tm.tm_min = m;
+                        tm.tm_sec = s;
+                        
+                        // Treat as UTC -> Local
+                        
+                        // timegm is not standard, use mktime with UTC TZ trick
+                        const char* tz = getenv("TZ");
+                        String oldTz = tz ? String(tz) : "";
+                        setenv("TZ", "UTC0", 1);
+                        tzset();
+                        time_t t = mktime(&tm); 
+                        if (oldTz.length() > 0) setenv("TZ", oldTz.c_str(), 1);
+                        else unsetenv("TZ");
+                        tzset();
+
+                        struct tm *loc = localtime(&t);
+                        h = loc->tm_hour;
+                        m = loc->tm_min;
+                    }
+                    
+                    hourVal = h + m / 60.0;
+                    char buf[6];
+                    sprintf(buf, "%02d:%02d", h, m);
+                    dispStr = String(buf);
+                    //Serial.printf("Parsed %s -> %.2f\n", tStr.c_str(), hourVal);
+                } else {
+                    //Serial.printf("Failed to parse time string: %s\n", tStr.c_str());
+                }
+            };
+            
+            parseTime(rise, dailyForecasts[i].sunriseHour, dailyForecasts[i].sunrise);
+            parseTime(set, dailyForecasts[i].sunsetHour, dailyForecasts[i].sunset);
+
             Serial.printf("Day %d: %s, High: %.1f, Low: %.1f, Icon: %s\n", i, dailyForecasts[i].dayName.c_str(), dailyForecasts[i].tempHigh, dailyForecasts[i].tempLow, dailyForecasts[i].iconName.c_str());
         }
+        http.end();
+        return true;
       }
     } else {
       Serial.print("Error code: ");
@@ -168,9 +232,10 @@ void getDailyForecastData() {
   } else {
     Serial.println("WiFi Disconnected");
   }
+  return false;
 }
 
-void getHourlyForecastData(int hoursCount) {
+bool getHourlyForecastData(int hoursCount) {
   if (WiFi.status() == WL_CONNECTED) {
     // Request hoursCount hours to ensure we cover the rest of the current day
     String url = "https://weather.googleapis.com/v1/forecast/hours:lookup?key=" + String(GOOGLE_API_KEY) 
@@ -183,8 +248,10 @@ void getHourlyForecastData(int hoursCount) {
 
     WiFiClientSecure client;
     client.setInsecure();
+    client.setTimeout(15000); // 15s timeout for larger payload
     HTTPClient http;
     http.begin(client, url);
+    http.setTimeout(15000);
     int httpResponseCode = http.GET();
     
     if (httpResponseCode > 0) {
@@ -195,6 +262,8 @@ void getHourlyForecastData(int hoursCount) {
       filter["forecastHours"][0]["interval"]["startTime"] = true; // "2026-01-03T17:00:00Z"
       filter["forecastHours"][0]["temperature"]["degrees"] = true;
       filter["forecastHours"][0]["precipitation"]["probability"]["percent"] = true;
+      filter["forecastHours"][0]["pressure"]["meanSeaLevelMillibars"] = true;
+      filter["forecastHours"][0]["airPressure"]["meanSeaLevelMillibars"] = true;
 
       JsonDocument doc;
       DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
@@ -202,14 +271,28 @@ void getHourlyForecastData(int hoursCount) {
       if (error) {
         Serial.print("deserializeJson() failed: ");
         Serial.println(error.c_str());
+        http.end();
+        return false;
       } else {
         // Reset hourly data for the new day
         for(int i=0; i<24; i++) {
+            float preservedIndoor = hourlyData[i].indoorTemp;
+            float preservedIndoorP = hourlyData[i].indoorPressure;
+
             hourlyData[i].hour = i;
             hourlyData[i].temp = -100.0; // Sentinel for no data
             hourlyData[i].rainProb = -1; // Sentinel for no data
             hourlyData[i].actualTemp = -100.0;
             hourlyData[i].actualRain = -1.0;
+            hourlyData[i].indoorTemp = preservedIndoor;
+            // Preserving indoor pressure
+            if (preservedIndoorP != 0 && !isnan(preservedIndoorP)) {
+                 hourlyData[i].indoorPressure = preservedIndoorP;
+            } else {
+                 hourlyData[i].indoorPressure = -1.0;
+            }
+            hourlyData[i].pressure = -1.0;
+            hourlyData[i].actualPressure = -1.0;
         }
 
         // Get current day to filter forecast
@@ -294,6 +377,9 @@ void getHourlyForecastData(int hoursCount) {
             // Now convert t_utc to local time
             struct tm *tm_local = localtime(&t_utc);
             
+            // Debug print
+            // Serial.printf("Forecast Time: %s -> Local: Day %d, Hour %d\n", timeStr.c_str(), tm_local->tm_mday, tm_local->tm_hour);
+
             // Check if this forecast is for "today" (the day we are currently in)
             if (tm_local->tm_mday == currentDay) {
                 int hour = tm_local->tm_hour;
@@ -301,11 +387,19 @@ void getHourlyForecastData(int hoursCount) {
                     hourlyData[hour].hour = hour;
                     hourlyData[hour].temp = f["temperature"]["degrees"];
                     hourlyData[hour].rainProb = f["precipitation"]["probability"]["percent"];
+                    
+                    if (f["pressure"].containsKey("meanSeaLevelMillibars")) {
+                         hourlyData[hour].pressure = f["pressure"]["meanSeaLevelMillibars"];
+                    } else if (f["airPressure"].containsKey("meanSeaLevelMillibars")) {
+                         hourlyData[hour].pressure = f["airPressure"]["meanSeaLevelMillibars"];
+                    }
                     // actualTemp is left as -100.0
                 }
             }
         }
         Serial.println("Hourly data updated (Midnight to Midnight).");
+        http.end();
+        return true;
       }
     } else {
       Serial.print("Error code: ");
@@ -315,9 +409,10 @@ void getHourlyForecastData(int hoursCount) {
   } else {
     Serial.println("WiFi Disconnected");
   }
+  return false;
 }
 
-void getHistoryData(int hoursCount) {
+bool getHistoryData(int hoursCount) {
   if (WiFi.status() == WL_CONNECTED) {
     // Request hoursCount hours of history to cover the current day so far
     String url = "https://weather.googleapis.com/v1/history/hours:lookup?key=" + String(GOOGLE_API_KEY) 
@@ -330,8 +425,10 @@ void getHistoryData(int hoursCount) {
 
     WiFiClientSecure client;
     client.setInsecure();
+    client.setTimeout(15000);
     HTTPClient http;
     http.begin(client, url);
+    http.setTimeout(15000);
     int httpResponseCode = http.GET();
     
     if (httpResponseCode > 0) {
@@ -342,6 +439,8 @@ void getHistoryData(int hoursCount) {
       filter["historyHours"][0]["interval"]["startTime"] = true;
       filter["historyHours"][0]["temperature"]["degrees"] = true;
       filter["historyHours"][0]["precipitation"]["rainfallMM"] = true;
+      filter["historyHours"][0]["pressure"]["meanSeaLevelMillibars"] = true;
+      filter["historyHours"][0]["airPressure"]["meanSeaLevelMillibars"] = true; // Try both keys just in case
 
       JsonDocument doc;
       DeserializationError error = deserializeJson(doc, payload, DeserializationOption::Filter(filter));
@@ -349,6 +448,8 @@ void getHistoryData(int hoursCount) {
       if (error) {
         Serial.print("deserializeJson() failed: ");
         Serial.println(error.c_str());
+        http.end();
+        return false;
       } else {
         // Get current day to filter history
         struct tm timeinfo;
@@ -386,6 +487,9 @@ void getHistoryData(int hoursCount) {
             
             struct tm *tm_local = localtime(&t_utc);
             
+            // Debug print
+            // Serial.printf("History Time: %s -> Local: Day %d, Hour %d\n", timeStr.c_str(), tm_local->tm_mday, tm_local->tm_hour);
+
             // Check if this history point is for "today"
             if (tm_local->tm_mday == currentDay) {
                 int hour = tm_local->tm_hour;
@@ -394,14 +498,20 @@ void getHistoryData(int hoursCount) {
                     if (h_data["precipitation"].containsKey("rainfallMM")) {
                         hourlyData[hour].actualRain = h_data["precipitation"]["rainfallMM"];
                     } else {
-                        hourlyData[hour].actualRain = 0.0; // Assume 0 if missing? Or keep -1? Let's assume 0 if object exists but field missing, or just 0.
-                        // Actually, if precipitation object is missing, it might mean 0 rain.
-                        // But we filtered for it.
+                        hourlyData[hour].actualRain = 0.0;
+                    }
+
+                    if (h_data["pressure"].containsKey("meanSeaLevelMillibars")) {
+                         hourlyData[hour].actualPressure = h_data["pressure"]["meanSeaLevelMillibars"];
+                    } else if (h_data["airPressure"].containsKey("meanSeaLevelMillibars")) {
+                         hourlyData[hour].actualPressure = h_data["airPressure"]["meanSeaLevelMillibars"];
                     }
                 }
             }
         }
         Serial.println("History data updated.");
+        http.end();
+        return true;
       }
     } else {
       Serial.print("Error code: ");
@@ -411,9 +521,10 @@ void getHistoryData(int hoursCount) {
   } else {
     Serial.println("WiFi Disconnected");
   }
+  return false;
 }
 
-void getWeatherCurrentData(){
+bool getWeatherCurrentData(){
     if (WiFi.status() == WL_CONNECTED) {
     String url = "https://weather.googleapis.com/v1/currentConditions:lookup?key=" + String(GOOGLE_API_KEY) 
       + "&location.latitude=" + String(LATITUDE) 
@@ -424,8 +535,10 @@ void getWeatherCurrentData(){
 
     WiFiClientSecure client;
     client.setInsecure();
+    client.setTimeout(10000);
     HTTPClient http;
     http.begin(client, url);
+    http.setTimeout(10000);
     int httpResponseCode = http.GET();
     
     if (httpResponseCode > 0) {
@@ -452,9 +565,13 @@ void getWeatherCurrentData(){
       if (error) {
         Serial.print("deserializeJson() failed: ");
         Serial.println(error.c_str());
+        http.end();
+        return false;
       } else {
         JsonObject newWeather = doc.as<JsonObject>();
         updateCurrentWeather(newWeather);
+        http.end();
+        return true;
       }
     } else {
       Serial.print("Error code: ");
@@ -464,4 +581,5 @@ void getWeatherCurrentData(){
   } else {
     Serial.println("WiFi Disconnected");
   }
+  return false;
 }

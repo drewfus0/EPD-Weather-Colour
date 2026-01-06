@@ -5,6 +5,9 @@
 #include <ArduinoJson.h>
 #include <time.h>
 #include <Preferences.h>
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BME280.h>
 #include "secrets.h"
 #include "Display.h"
 #include "WeatherAPI.h"
@@ -17,6 +20,8 @@ const char* ntpServer = "pool.ntp.org";
 const char* time_zone = "AEST-10AEDT,M10.1.0,M4.1.0/3";
 
 Preferences preferences;
+Adafruit_BME280 bme; // I2C
+
 
 // Data validity flags
 #define DATA_NONE    0
@@ -46,6 +51,10 @@ struct DailyForecastRTC {
   char conditionText[64];
   float tempHigh;
   float tempLow;
+  char sunrise[8];
+  char sunset[8];
+  float sunriseHour;
+  float sunsetHour;
 };
 
 WeatherData currentWeather;
@@ -61,11 +70,16 @@ void saveWeatherData(int typeMask, int currentHour, int currentDay) {
     int savedDay = preferences.getInt("day", -1);
     int status = preferences.getInt("status", DATA_NONE);
 
-    // If time changed, reset status
-    if (savedHour != currentHour || savedDay != currentDay) {
+    // If day changed, reset everything
+    if (savedDay != currentDay) {
         status = DATA_NONE;
-        preferences.putInt("hour", currentHour);
         preferences.putInt("day", currentDay);
+        preferences.putInt("hour", currentHour);
+    }
+    // If hour changed (but day is same), keep Daily, clear others
+    else if (savedHour != currentHour) {
+        status &= DATA_DAILY;
+        preferences.putInt("hour", currentHour);
     }
 
     // Save specific data based on mask
@@ -94,6 +108,10 @@ void saveWeatherData(int typeMask, int currentHour, int currentDay) {
             strlcpy(daily[i].conditionText, dailyForecasts[i].conditionText.c_str(), sizeof(daily[i].conditionText));
             daily[i].tempHigh = dailyForecasts[i].tempHigh;
             daily[i].tempLow = dailyForecasts[i].tempLow;
+            strlcpy(daily[i].sunrise, dailyForecasts[i].sunrise.c_str(), sizeof(daily[i].sunrise));
+            strlcpy(daily[i].sunset, dailyForecasts[i].sunset.c_str(), sizeof(daily[i].sunset));
+            daily[i].sunriseHour = dailyForecasts[i].sunriseHour;
+            daily[i].sunsetHour = dailyForecasts[i].sunsetHour;
         }
         preferences.putBytes("daily", daily, sizeof(daily));
     }
@@ -117,34 +135,15 @@ int loadWeatherData(int currentHour, int currentDay) {
     int savedDay = preferences.getInt("day", -1);
     int status = preferences.getInt("status", DATA_NONE);
     
-    if (savedHour != currentHour || savedDay != currentDay) {
-        Serial.printf("Saved data is old or missing (Saved: %d/%d, Current: %d/%d)\n", savedDay, savedHour, currentDay, currentHour);
+    if (savedDay != currentDay) {
+        Serial.printf("New day (Saved: %d, Current: %d). Resetting data.\n", savedDay, currentDay);
         preferences.end();
         return DATA_NONE;
     }
 
-    // Load Current
-    if (status & DATA_CURRENT) {
-        WeatherDataRTC wd;
-        if (preferences.getBytes("current", &wd, sizeof(wd)) == sizeof(wd)) {
-            currentWeather.conditionText = String(wd.conditionText);
-            currentWeather.iconName = String(wd.iconName);
-            currentWeather.temp = wd.temp;
-            currentWeather.feelsLike = wd.feelsLike;
-            currentWeather.windSpeed = wd.windSpeed;
-            currentWeather.windGust = wd.windGust;
-            currentWeather.windDirection = wd.windDirection;
-            currentWeather.humidity = wd.humidity;
-            currentWeather.precipitationProbability = wd.precipitationProbability;
-            currentWeather.uvIndex = wd.uvIndex;
-            currentWeather.pressure = wd.pressure;
-            currentWeather.valid = wd.valid;
-        } else {
-            status &= ~DATA_CURRENT; // Failed to load
-        }
-    }
+    int validStatus = DATA_NONE;
 
-    // Load Daily
+    // Load Daily (Valid as long as day matches)
     if (status & DATA_DAILY) {
         DailyForecastRTC daily[5];
         if (preferences.getBytes("daily", daily, sizeof(daily)) == sizeof(daily)) {
@@ -154,23 +153,54 @@ int loadWeatherData(int currentHour, int currentDay) {
                 dailyForecasts[i].conditionText = String(daily[i].conditionText);
                 dailyForecasts[i].tempHigh = daily[i].tempHigh;
                 dailyForecasts[i].tempLow = daily[i].tempLow;
+                dailyForecasts[i].sunrise = String(daily[i].sunrise);
+                dailyForecasts[i].sunset = String(daily[i].sunset);
+                dailyForecasts[i].sunriseHour = daily[i].sunriseHour;
+                dailyForecasts[i].sunsetHour = daily[i].sunsetHour;
             }
-        } else {
-            status &= ~DATA_DAILY;
+            validStatus |= DATA_DAILY;
         }
     }
 
-    // Load Hourly (Shared by Forecast and History)
+    // Load Hour-Specific Data (Only if hour matches)
+    if (savedHour == currentHour) {
+        // Load Current
+        if (status & DATA_CURRENT) {
+            WeatherDataRTC wd;
+            if (preferences.getBytes("current", &wd, sizeof(wd)) == sizeof(wd)) {
+                currentWeather.conditionText = String(wd.conditionText);
+                currentWeather.iconName = String(wd.iconName);
+                currentWeather.temp = wd.temp;
+                currentWeather.feelsLike = wd.feelsLike;
+                currentWeather.windSpeed = wd.windSpeed;
+                currentWeather.windGust = wd.windGust;
+                currentWeather.windDirection = wd.windDirection;
+                currentWeather.humidity = wd.humidity;
+                currentWeather.precipitationProbability = wd.precipitationProbability;
+                currentWeather.uvIndex = wd.uvIndex;
+                currentWeather.pressure = wd.pressure;
+                currentWeather.valid = wd.valid;
+                validStatus |= DATA_CURRENT;
+            }
+        }
+    } else {
+        Serial.printf("New hour (Saved: %d, Current: %d). Retaining Daily, clearing others.\n", savedHour, currentHour);
+    }
+    
+    // Load Hourly/History even if hour doesn't match (as long as day matches, which is checked above)
+    // We need this to preserve accumulated indoor temperature and history data
     if ((status & DATA_HOURLY) || (status & DATA_HISTORY)) {
-        if (preferences.getBytes("hourly", hourlyData, sizeof(hourlyData)) != sizeof(hourlyData)) {
-             status &= ~DATA_HOURLY;
-             status &= ~DATA_HISTORY;
+        if (preferences.getBytes("hourly", hourlyData, sizeof(hourlyData)) == sizeof(hourlyData)) {
+                // If hour matches, we consider the forecast/history valid (no need to re-fetch)
+                if (savedHour == currentHour) {
+                    validStatus |= (status & (DATA_HOURLY | DATA_HISTORY));
+                }
         }
     }
 
     preferences.end();
-    Serial.printf("Weather data loaded (Status: %d)\n", status);
-    return status;
+    Serial.printf("Weather data loaded (Status: %d)\n", validStatus);
+    return validStatus;
 }
 
 void connectToWiFi() {
@@ -268,21 +298,81 @@ void setup() {
     int currentDay = timeinfo.tm_yday;
 
     // Try to load stored data
+    // Initialize hourly array to safe defaults before loading or fetching
+    for(int i=0; i<24; i++) {
+        hourlyData[i].hour = i;
+        hourlyData[i].temp = -100.0;
+        hourlyData[i].actualTemp = -100.0;
+        hourlyData[i].rainProb = -1;
+        hourlyData[i].actualRain = -1.0;
+        hourlyData[i].indoorTemp = -100.0;
+        hourlyData[i].pressure = -1.0;
+        hourlyData[i].actualPressure = -1.0;
+        hourlyData[i].indoorPressure = -1.0;
+    }
+
     int status = loadWeatherData(currentHour, currentDay);
-    
+
+    // Initialize and read BME280
+    // Standard I2C: SDA=21, SCL=22. Address 0x76 (SDO=GND) is common for modules.
+    Serial.println("Initializing BME280...");
+    if (!bme.begin(0x76)) {
+        Serial.println("Could not find a valid BME280 sensor, check wiring!");
+    } else {
+        // Mode normal, standby time 1000ms, filter off?
+        // Default settings are usually fine for single shot reading.
+        // Or force a measurement if in sleep mode?
+        // adafruit library puts it in normal mode by default.
+        
+        float indoorT = bme.readTemperature();
+        float indoorH = bme.readHumidity();
+        float indoorP = bme.readPressure() / 100.0F;
+
+        Serial.printf("BME280: Temp=%.2f C, Hum=%.2f %%, Pres=%.2f hPa\n", indoorT, indoorH, indoorP);
+        
+        // Update Current Weather Indoor Data
+        currentWeather.indoorTemp = indoorT;
+        currentWeather.indoorHumidity = indoorH;
+        currentWeather.indoorPressure = indoorP;
+        
+        // Update Hourly Data for Graph - Current Hour
+        hourlyData[currentHour].indoorTemp = indoorT;
+        hourlyData[currentHour].indoorPressure = indoorP;
+        
+        // Mark as needing save? We'll just call save if we don't fetch anything else, 
+        // or let the fetch save it (since it saves the whole array).
+        // To be safe, let's flag that we have updated hourly data.
+        // We can just rely on the saveWeatherData calls later if they happen.
+        // If NO fetch happens (status == stored), we still want to save this new reading if it wasn't there.
+        // Let's do a save right here? It might be redundant but safe.
+        // Actually, let's just do it at the end of the logic if needed.
+        // Or just do it here. It's fast enough.
+        saveWeatherData(DATA_HOURLY, currentHour, currentDay);
+    }
+
+    // Validate loaded data for current hour
+    // If we think we have hourly data, but the current hour is empty, force a refresh.
+    if ((status & DATA_HOURLY) && hourlyData[currentHour].temp == -100.0 && hourlyData[currentHour].actualTemp == -100.0) {
+        Serial.printf("Data for current hour (%d) is missing. Forcing refresh.\n", currentHour);
+        status &= ~DATA_HOURLY;
+        status &= ~DATA_HISTORY;
+        // Also force current to be safe
+        status &= ~DATA_CURRENT;
+    }
+
     // Check what is missing and fetch it
     if (!(status & DATA_CURRENT)) {
         Serial.println("Fetching Current Weather...");
-        getWeatherCurrentData();
-        if (currentWeather.valid) {
+        if (getWeatherCurrentData() && currentWeather.valid) {
             saveWeatherData(DATA_CURRENT, currentHour, currentDay);
         }
     }
 
     if (!(status & DATA_DAILY)) {
         Serial.println("Fetching Daily Forecast...");
-        getDailyForecastData();
-        saveWeatherData(DATA_DAILY, currentHour, currentDay);
+        if (getDailyForecastData()) {
+            saveWeatherData(DATA_DAILY, currentHour, currentDay);
+        }
     }
 
     if (!(status & DATA_HOURLY)) {
@@ -290,8 +380,9 @@ void setup() {
         // Forecast: From now until end of day (approx). 
         int forecastHours = 24 - currentHour + 2;
         if (forecastHours > 48) forecastHours = 48; 
-        getHourlyForecastData(forecastHours);
-        saveWeatherData(DATA_HOURLY, currentHour, currentDay);
+        if (getHourlyForecastData(forecastHours)) {
+            saveWeatherData(DATA_HOURLY, currentHour, currentDay);
+        }
     }
 
     if (!(status & DATA_HISTORY)) {
@@ -299,18 +390,32 @@ void setup() {
         // History: From midnight until now.
         int historyHours = currentHour + 1;
         if (historyHours > 24) historyHours = 24;
-        getHistoryData(historyHours);
-        saveWeatherData(DATA_HISTORY, currentHour, currentDay);
+        if (getHistoryData(historyHours)) {
+            saveWeatherData(DATA_HISTORY, currentHour, currentDay);
+        }
     }
     
     // display forcast data hourly to serial
-    Serial.println("--- Forecast Data: 3 day ---");
-    for(int i=0; i<3; i++) {
+    Serial.println("--- Forecast Data: 5 day ---");
+    for(int i=0; i<5; i++) {
         Serial.printf("Forecast Day %d: %s, High: %.1f, Low: %.1f, Icon: %s\n", i, dailyForecasts[i].dayName.c_str(), dailyForecasts[i].tempHigh, dailyForecasts[i].tempLow, dailyForecasts[i].iconName.c_str());
     }
     Serial.println("--- Hourly Data: 24 hour ---");
+    Serial.printf("%8s|%8s|%8s|%8s|%8s|%8s|%8s|%8s|%8s\n", "Hour", "Temp", "Actual", "Indoor", "Rain", "Prob", "Press", "IndPre", "Wind");
+    Serial.println("--------|--------|--------|--------|--------|--------|--------|--------|--------");
     for(int i=0; i<24; i++) {
-        Serial.printf("Hour %02d: Temp: %.1f, Rain Prob: %d%%, Actual Temp: %.1f\n", hourlyData[i].hour, hourlyData[i].temp, hourlyData[i].rainProb, hourlyData[i].actualTemp);
+      Serial.printf("%8d|%8.1f|%8.1f|%8.1f|%8.1f|%7d%%|%8.1f|%8.1f|%8.1f\n", 
+        if (hourlyData[i].indoorPressure == -1.0) hourlyData[i].indoorPressure = -100.0; // Alignment for print if needed or keep uniform sentinel
+
+        hourlyData[i].hour, 
+        hourlyData[i].temp, 
+        hourlyData[i].actualTemp, 
+        hourlyData[i].indoorTemp, 
+        hourlyData[i].actualRain, 
+        hourlyData[i].rainProb,
+        hourlyData[i].pressure,
+        hourlyData[i].indoorPressure);
+        //hourlyData[i].windSpeed);
     }
 
   } else {

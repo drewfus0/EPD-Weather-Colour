@@ -21,8 +21,8 @@ Done add dots to temp line where min and max temps are, and label them.
 - create a 3d printed enclosure to hold the screen and components.
 - BME280 or BME620 connect and configure.
 - log, report and graph inside temp values from the BME temp sensor.
-- pull Sunrise and sunset from the dayly forcast and display.
-- display the Sunrise and Sunset for today.
+Done pull Sunrise and sunset from the dayly forcast and display.
+Done display the Sunrise and Sunset for today (on graph).
 - Rank the information on the display, better understanding when updating layout.
 - play with the formating of the screen to better highlight important information.
 
@@ -47,7 +47,7 @@ Done add dots to temp line where min and max temps are, and label them.
 **Hourly Graph (Bottom Right - 24 Hours):**
 - **Axes:** Time (X), Temperature (Left Y), Rain % (Right Y)
 - **Temperature Lines:** Forecast (Red) + History (Green)
-- **Rain Bars:** Probability (Blue) + Actual (Orange)
+- **Rain Bars:** Probability (Blue) + Actual ()
 - **Highlights:** Min/Max Dots & Labels for both Forecast and History
 
 ### Unused / Available Data Points

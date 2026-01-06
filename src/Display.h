@@ -28,6 +28,9 @@ struct WeatherData {
   int uvIndex;
   int pressure;
   bool valid = false;
+  float indoorTemp = -100.0;
+  float indoorHumidity = -1.0;
+  float indoorPressure = -1.0;
 };
 
 struct DailyForecast {
@@ -36,6 +39,14 @@ struct DailyForecast {
   String conditionText;
   float tempHigh;
   float tempLow;
+  String sunrise;
+  String sunset;
+  float sunriseHour = -1.0;
+  float sunsetHour = -1.0;
+
+  DailyForecast() {}
+  DailyForecast(String dn, String iname, String ct, float th, float tl, String sr, String ss, float srh, float ssh) 
+    : dayName(dn), iconName(iname), conditionText(ct), tempHigh(th), tempLow(tl), sunrise(sr), sunset(ss), sunriseHour(srh), sunsetHour(ssh) {}
 };
 
 struct HourlyData {
@@ -44,6 +55,10 @@ struct HourlyData {
   int rainProb;
   float actualTemp = -100.0; // -100 indicates no data
   float actualRain = -1.0;   // -1 indicates no data
+  float indoorTemp = -100.0; // -100 indicates no data
+  float pressure = -1.0;
+  float actualPressure = -1.0;
+  float indoorPressure = -1.0;
 };
 
 class Display {
@@ -62,7 +77,8 @@ private:
     void RenderSecondaryValue(int16_t x, int16_t y, String text, int16_t maxCharsPerLine = 20);
     void drawWindDirection(int cx, int cy, int r, float WindDirection);
     void drawDailyForecast(int x, int y, int w, int h, const DailyForecast daily[]);
-    void drawGraphs(int x, int y, int w, int h, const HourlyData hourly[]);
+    void drawGraphs(int x, int y, int w, int h, const HourlyData hourly[], const DailyForecast& today);
+    void drawDottedLine(int x0, int y0, int x1, int y1, uint16_t color);
 };
 
 #endif
