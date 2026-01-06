@@ -12,6 +12,12 @@ Done add last update time.
 
 Done add horizontal grid lines.
 Done add dots to temp line where min and max temps are, and label them.
+Done BME280 or BME620 connect and configure.
+Done log, report and graph inside temp values from the BME temp sensor.
+Done pull Sunrise and sunset from the dayly forcast and display.
+Done display the Sunrise and Sunset for today (on graph).
+Done Refactor main.cpp to separate persistence logic into WeatherStorage class.
+
 - add wifi config, local webpage, QR code for wifi ap and link to ipaddress\page for wifi config.
 - additionnal web interface (what to show or configure???? add to this list)
 - Use more green, yellow and red.
@@ -19,10 +25,6 @@ Done add dots to temp line where min and max temps are, and label them.
 - values to be blue if they are considered low.
 - values to be black or Green if they are not high or low.
 - create a 3d printed enclosure to hold the screen and components.
-- BME280 or BME620 connect and configure.
-- log, report and graph inside temp values from the BME temp sensor.
-Done pull Sunrise and sunset from the dayly forcast and display.
-Done display the Sunrise and Sunset for today (on graph).
 - Rank the information on the display, better understanding when updating layout.
 - play with the formating of the screen to better highlight important information.
 
